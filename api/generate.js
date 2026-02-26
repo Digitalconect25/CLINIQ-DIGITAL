@@ -1,4 +1,5 @@
 export default async function handler(req, res) {
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -29,18 +30,9 @@ export default async function handler(req, res) {
     });
 
     const data = await response.json();
-
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: data.error?.message || data.error || 'Anthropic API error',
-        status: response.status,
-        type: data.error?.type || 'unknown'
-      });
-    }
-
-    return res.status(200).json(data);
+    return res.status(response.status).json(data);
   } catch (error) {
-    console.error('Anthropic API error:', error);
-    return res.status(500).json({ error: 'Server error: ' + error.message });
+    console.error('Anthropic proxy error:', error);
+    return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }
