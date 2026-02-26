@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -7,7 +6,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured on server' });
 
   try {
     const body = req.body;
@@ -24,15 +23,24 @@ export default async function handler(req, res) {
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
-        'anthropic-version': '2024-01-01',
+        'anthropic-version': '2024-06-01',
       },
       body: JSON.stringify(anthropicBody),
     });
 
     const data = await response.json();
-    return res.status(response.status).json(data);
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: data.error?.message || data.error || 'Anthropic API error',
+        status: response.status,
+        type: data.error?.type || 'unknown'
+      });
+    }
+
+    return res.status(200).json(data);
   } catch (error) {
     console.error('Anthropic API error:', error);
-    return res.status(500).json({ error: 'Internal server error', detail: error.message });
+    return res.status(500).json({ error: 'Server error: ' + error.message });
   }
 }
