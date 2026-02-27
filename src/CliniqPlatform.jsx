@@ -1651,7 +1651,6 @@ function Clients(){
             <span style={{fontSize:11,color:C.tx,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{shareLink}</span>
             <span onClick={()=>window.open(shareLink,"_blank")} style={{fontSize:11,color:C.blue,cursor:"pointer",whiteSpace:"nowrap"}}>Abrir</span>
           </div>}
-          </div>
           {lopdView===c.id&&<div style={{marginTop:10,background:C.bg,border:"1px solid "+C.bd,borderRadius:8,padding:16,maxHeight:300,overflowY:"auto"}}>
             <div style={{fontSize:11,color:C.w,lineHeight:1.7,whiteSpace:"pre-wrap",fontFamily:"monospace"}}>{generateLOPD(c)}</div>
           </div>}
