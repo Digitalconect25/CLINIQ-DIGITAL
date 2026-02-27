@@ -256,7 +256,7 @@ function Sel({value,onChange,opts,ph}){
   return <select value={value} onChange={e=>onChange(e.target.value)} style={{
     background:C.sf,border:"1px solid "+C.bd,color:C.w,padding:"10px 14px",
     borderRadius:8,fontFamily:font,fontSize:13,outline:"none",width:"100%",boxSizing:"border-box"
-  }}>{ph&&<option value="">{ph}</option>}{opts.map(o=><option key={typeof o==="string"?o:o.value} value={typeof o==="string"?o:o.value}>{typeof o==="string"?o:o.label}</option>)}</select>;
+  }}>{ph&&<option value="">{ph}</option>}{opts.map(o=>{const val=typeof o==="string"?o:(o.value||o.v);const lbl=typeof o==="string"?o:(o.label||o.l);return <option key={val} value={val}>{lbl}</option>;})}</select>;
 }
 function Inp({value,onChange,ph,type}){
   return <input type={type||"text"} value={value} onChange={e=>onChange(e.target.value)} placeholder={ph} style={{
@@ -277,8 +277,12 @@ function Fld({label,children}){return <div><Lbl>{label}</Lbl>{children}</div>;}
 function Badge({text,color}){return <span style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:6,background:bg8(color||C.teal),color:color||C.teal}}>{text}</span>;}
 
 /* ── NICHE SELECTOR ── */
-function NicheSelector({niche,setNiche,customNiche,setCustomNiche}){
+function NicheSelector({niche,setNiche,customNiche,setCustomNiche,onClientSelect}){
   return <>
+    <ClientQuickFill onSelect={({nombre,nicho,ciudad,provincia})=>{
+      if(nicho) setNiche(nicho);
+      if(onClientSelect) onClientSelect({nombre:nombre||"",ciudad:ciudad||"",provincia:provincia||""});
+    }}/>
     <Fld label="Nicho / Sector">
       <Sel value={niche} onChange={setNiche} opts={NICHES.map(n=>n.lb)} ph="Seleccionar sector..."/>
     </Fld>
@@ -320,6 +324,39 @@ function resolveTx(treatment,customTx){
 function resolveNiche(nicheLabel,custom){
   if(nicheLabel===NICHES.find(n=>n.id==="otro")?.lb && custom) return custom;
   return nicheLabel||"Clínica sanitaria privada";
+}
+
+/* ── CLIENT QUICK-FILL ── */
+let _qfCache=null;let _qfTime=0;
+function ClientQuickFill({onSelect}){
+  const[cls,setCls]=useState([]);
+  const[v,setV]=useState("");
+  useEffect(()=>{
+    const now=Date.now();
+    if(_qfCache&&now-_qfTime<60000){setCls(_qfCache);return;}
+    db.getClients().then(d=>{
+      if(d&&d.length>0){_qfCache=d;_qfTime=now;setCls(d);}
+    }).catch(()=>{});
+  },[]);
+  if(cls.length===0) return null;
+  const handle=(val)=>{
+    setV(val);
+    if(!val){onSelect({});return;}
+    const c=cls.find(x=>(x.nombre||"")==val);
+    if(c) onSelect({nombre:c.nombre||"",nicho:c.nicho||"",ciudad:c.ciudad_fiscal||c.ciudadFiscal||"",provincia:c.provincia_fiscal||c.provinciaFiscal||""});
+  };
+  return <div style={{padding:"8px 12px",background:C.teal+"12",border:"1px solid "+C.teal+"30",borderRadius:8,marginBottom:6}}>
+    <div style={{display:"flex",alignItems:"center",gap:8}}>
+      <span style={{fontSize:11,color:C.teal,fontWeight:600,whiteSpace:"nowrap"}}>Cliente:</span>
+      <select value={v} onChange={e=>handle(e.target.value)} style={{
+        background:C.sf,border:"1px solid "+C.bd,color:C.w,padding:"6px 10px",
+        borderRadius:6,fontFamily:font,fontSize:12,outline:"none",flex:1
+      }}>
+        <option value="">-- Rellenar manual --</option>
+        {cls.map(c=><option key={c.id} value={c.nombre}>{c.nombre}{c.nicho?" ("+c.nicho+")":""}</option>)}
+      </select>
+    </div>
+  </div>;
 }
 
 /* ── GEO FIELDS ── */
@@ -797,7 +834,7 @@ Genera TEXTO COMPLETO Y DEFINITIVO para cada seccion (texto real listo para publ
 - Schema markup sugerido (tipo LocalBusiness + MedicalBusiness si sanitario)
 - Open Graph tags sugeridos`,sO,sL,nR,geo)}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <TreatmentSelector niche={ni} treatment={tx} setTreatment={sTx} customTx={ctx} setCustomTx={sCtx}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
       <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
@@ -827,7 +864,7 @@ Genera contenido LISTO PARA COPIAR Y ENVIAR por WhatsApp Business:
 6. ERRORES FRECUENTES
 7. NOTAS LEGALES`,sO,sL,nR,"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <Fld label="Escenario"><Sel value={sc} onChange={sSc} opts={scs} ph="Seleccionar..."/></Fld>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
     </>}/>;
@@ -888,7 +925,7 @@ function Followup(){
 Centro: ${nm||"[Nombre]"}. Canal: ${ch}. Sector: ${nR}.
 Genera 5 mensajes COMPLETOS: DIA 1, DIA 3, DIA 7, DIA 14, DIA 30. Incluye ASUNTO, MENSAJE, OBJETIVO, METRICA, REGLAS, NOTAS LEGALES, VARIACIONES A/B.`,sO,sL,nR,"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <TreatmentSelector niche={ni} treatment={tx} setTreatment={sTx} customTx={ctx} setCustomTx={sCtx}/>
       <Fld label="Canal"><Sel value={ch} onChange={sCh} opts={["Email","WhatsApp","SMS"]}/></Fld>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
@@ -905,7 +942,7 @@ function WebStruct(){
     `Arquitectura web completa para: ${nm||"[Nombre]"}. Localizacion: ${geo}. Especialidades: ${sp||"[Definir]"}. Equipo: ${dc||"[Definir]"}. Sector: ${nR}.
 Genera: MAPA DEL SITIO CON URLs, HOME, PLANTILLA SERVICIO, EQUIPO, BLOG, PAGINAS TRANSVERSALES, ENLAZADO INTERNO, SEO TECNICO.`,sO,sL,nR,geo)}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
       <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
       <Fld label="Especialidades"><Txa value={sp} onChange={sSp} ph="Servicios principales..." rows={2}/></Fld>
@@ -924,7 +961,7 @@ function Social(){
     `Estrategia completa de ${pl} para: ${nm||"[Nombre]"}. Sector: ${nR}. Localizacion: ${geo}. Periodo: ${wk}. Objetivo: ${obj}.
 Genera: ANALISIS, PILARES DE CONTENIDO, CALENDARIO EDITORIAL, GUIONES REELS, STORIES, HASHTAGS, METRICAS, CUMPLIMIENTO NORMATIVO.`,sO,sL,nR,geo)}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Plataforma"><Sel value={pl} onChange={sPl} opts={["Instagram","TikTok","Facebook","LinkedIn","Instagram + TikTok","Todas"]}/></Fld>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
       <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
@@ -943,7 +980,7 @@ function Gbp(){
     `Guia completa GBP para: ${nm||"[Nombre]"}. Localizacion: ${geo}. Sector: ${nR}.
 Genera: CHECKLIST OPTIMIZACION, ESTRATEGIA FOTOS, PUBLICACIONES (4 semanas), RESPUESTAS RESENAS, FAQ PROACTIVAS, MONITORIZACION.`,sO,sL,nR,geo)}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
       <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
     </>}/>;
@@ -960,7 +997,7 @@ function Video(){
 Centro: ${nm||"[Nombre]"}. Profesional: ${dc||"[Nombre]"}. Objetivo: ${gl}.
 Genera 4 scripts: EDUCATIVO, MITOS, PROCESO, FAQ. Cada uno con GANCHO, DESARROLLO, CTA, TEXTO PANTALLA, INDICACIONES, COPY POST, HASHTAGS.`,sO,sL,nR,"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <TreatmentSelector niche={ni} treatment={tx} setTreatment={sTx} customTx={ctx} setCustomTx={sCtx}/>
       <Fld label="Plataforma"><Sel value={pl} onChange={sPl} opts={["Instagram Reels","TikTok","YouTube Shorts","YouTube largo"]}/></Fld>
       <Fld label="Objetivo"><Sel value={gl} onChange={sGl} opts={["Educar","Generar confianza","Resolver dudas","Mostrar autoridad","Humanizar"]}/></Fld>
@@ -979,7 +1016,7 @@ function Competitor(){
     `Analisis competencia local para: ${nm} en ${geo}. Competidores: ${cm||"Buscar principales"}. Sector: ${nR}.
 Genera: MAPA COMPETITIVO, WEB COMPARATIVO, SEO LOCAL, GOOGLE MAPS, REDES, PRECIOS, OPORTUNIDADES GEO-LOCALES, PLAN DE ACCION.`,sO,sL,nR,geo)}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Tu cliente"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
       <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
       <Fld label="Competidores (opcional)"><Txa value={cm} onChange={sCm} ph="Nombres de competidores conocidos..." rows={2}/></Fld>
@@ -1015,7 +1052,7 @@ function Reviews(){
 Centro: ${nm||"[Nombre]"}. Sector: ${nR}. Puntuacion: ${rt}. Tipo: ${sc}. ${rv?'Texto: "'+rv+'"':"(Solo puntuacion)"}.
 Genera: RESPUESTA PRINCIPAL, VARIANTE FORMAL, VARIANTE CERCANA, REGLAS, ACCION INTERNA${rt.includes("1")||rt.includes("2")||rt.includes("3")?", PROTOCOLO RECUPERACION":""}.`,sO,sL,nR,"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
       <Fld label="Puntuación"><Sel value={rt} onChange={sRt} opts={["5 estrellas","4 estrellas","3 estrellas","2 estrellas","1 estrella"]}/></Fld>
       <Fld label="Tipo"><Sel value={sc} onChange={sSc} opts={["Positiva general","Positiva detallada","Positiva sobre profesional","Negativa espera","Negativa precio","Negativa resultado","Negativa trato","Negativa injusta","Neutra"]}/></Fld>
@@ -1035,7 +1072,7 @@ function Report(){
 Datos: Visitas: ${vi||"[COMPLETAR]"}, Consultas: ${co||"[COMPLETAR]"}, Reservas: ${bk||"[COMPLETAR]"}, Google: ${gp||"[COMPLETAR]"}, Resenas: ${rv||"[COMPLETAR]"}, Redes: ${so||"[COMPLETAR]"}.
 Genera: RESUMEN EJECUTIVO, TRAFICO WEB, CONVERSION, SEO LOCAL, GBP, REDES, PLAN PROXIMO MES, PROYECCION.`,sO,sL,nR,"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
       <Fld label="Mes"><Sel value={mo} onChange={sMo} opts={["Enero 2026","Febrero 2026","Marzo 2026","Abril 2026","Mayo 2026","Junio 2026","Julio 2026","Agosto 2026","Septiembre 2026","Octubre 2026","Noviembre 2026","Diciembre 2026"]}/></Fld>
       <Fld label="Visitas web"><Inp value={vi} onChange={sVi} ph="Ej: 2.340"/></Fld>
@@ -1057,7 +1094,7 @@ function Manual(){
     `MANUAL DE COMUNICACION para: ${nm}. Sector: ${nR}. Servicios: ${tx||"[Principales]"}. Equipo: ${dc||"[Profesionales]"}. Tono: ${tn||"Profesional y cercano"}. Valores: ${vl||"[Valores]"}. Audiencia: ${au||"30-55 anos"}.
 Genera: IDENTIDAD DE MARCA, TONO DE VOZ, MENSAJES CLAVE, PROTOCOLOS, GUIA POR CANAL, GUIA VISUAL, CUMPLIMIENTO, PLANTILLAS.`,sO,sL,nR,"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre completo"/></Fld>
       <Fld label="Servicios"><Txa value={tx} onChange={sTx} ph="Servicios principales..." rows={2}/></Fld>
       <Fld label="Equipo"><Txa value={dc} onChange={sDc} ph="Profesionales..." rows={2}/></Fld>
@@ -1082,7 +1119,7 @@ function ScanPresencia(){
     <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
       <div style={{flex:"0 0 380px",maxWidth:"100%"}}><Crd>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
           <Fld label="Nombre del negocio *"><Inp value={nm} onChange={sNm} ph="Nombre exacto"/></Fld>
           <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Fld label="Web"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
@@ -1112,7 +1149,7 @@ function DeepAnalysis(){
     <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
       <div style={{flex:"0 0 380px",maxWidth:"100%"}}><Crd>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
           <Fld label="Nombre *"><Inp value={nm} onChange={sNm} ph="Nombre exacto"/></Fld>
           <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Fld label="Web"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
@@ -1139,7 +1176,7 @@ function Expansion(){
     `GUIA DE EXPANSION DIGITAL para: "${nm}" en ${ci}. Sector: ${nR}. Dir: ${dir||"[COMPLETAR]"}. Tel: ${tel||"[COMPLETAR]"}. Web: ${web||"[COMPLETAR]"}.
 Genera guia COMPLETA para: Google Business, Google Maps, Bing Places, Apple Maps, Facebook, Instagram, LinkedIn, Paginas Amarillas, Doctoralia (si salud). Para cada una: URL acceso, pasos, datos a introducir, descripcion optimizada, fotos, primeras acciones.`,sO,sL,nR,ci||"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Nombre *"><Inp value={nm} onChange={sNm} ph="Nombre exacto"/></Fld>
       <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
       <Fld label="Dirección"><Inp value={dir} onChange={sDir} ph="C/ Mayor 15"/></Fld>
@@ -1158,7 +1195,7 @@ function CitationsAudit(){
     `AUDITORIA NAP para: "${nm}". Dir: "${dir||"[COMPLETAR]"}". Ciudad: ${ci}. Tel: "${tel||"[COMPLETAR]"}". Web: "${web||"[COMPLETAR]"}". Sector: ${nR}.
 Genera: ANALISIS NOMBRE, DIRECCION, TELEFONO, WEB, IMPACTO SEO, CHECKLIST CORRECCION, HERRAMIENTAS, MANTENIMIENTO.`,sO,sL,nR,ci||"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Nombre oficial *"><Inp value={nm} onChange={sNm} ph="Nombre exacto"/></Fld>
       <Fld label="Dirección"><Inp value={dir} onChange={sDir} ph="C/ Mayor 15, 03001"/></Fld>
       <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
@@ -1179,7 +1216,7 @@ function Reputation(){
     <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
       <div style={{flex:"0 0 380px",maxWidth:"100%"}}><Crd>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
           <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
           <Fld label="Ciudad"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Btn primary disabled={!nm||!ni} color={C.teal} onClick={()=>
@@ -1208,7 +1245,7 @@ function VoiceSeo(){
     `ESTRATEGIA VOICE SEO para: ${nm} en ${ci}. Sector: ${nR}.
 Genera: CONSULTAS DE VOZ, FUENTES POR ASISTENTE, CONTENIDO OPTIMIZADO, SCHEMA MARKUP, BUSQUEDAS CERCA DE MI, METRICAS.`,sO,sL,nR,ci||"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
       <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
     </>}/>;
@@ -1223,7 +1260,7 @@ function BrandMonitor(){
     `PLAN MONITORIZACION MARCA para: ${nm} en ${ci||"Espana"}. Sector: ${nR}.
 Genera: ALERTAS GOOGLE, ALERTAS GBP, ALERTAS REDES, MONITORIZACION RESENAS, COMPETENCIA, CONTENIDO NEGATIVO, HERRAMIENTAS, PROTOCOLO RESPUESTA, INFORME MENSUAL, CALENDARIO.`,sO,sL,nR,ci||"Espana")}
     fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
       <Fld label="Ciudad"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
     </>}/>;
@@ -1370,7 +1407,7 @@ Sector: ${nR}. Centro: ${nm||"[Negocio]"}. Idea: ${idea}. Plataforma: ${platform
 Genera 4 prompts COMPLETOS listos para copiar, con parametros, negative prompt, instrucciones uso, tips del sector.`,sO,sL,nR,"Espana",
         {tool:"Prompts Imagen IA",client:nm||"Sin asignar",inputs:{idea:idea,plataforma:platform}})}
         fields={<>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
           <Fld label="Idea / Concepto *"><Txa value={idea} onChange={sIdea} ph="Ej: Foto recepcion clinica con ambiente calido..." rows={3}/></Fld>
           <Fld label="Plataforma IA"><Sel value={platform} onChange={setPlatform} opts={platforms}/></Fld>
           <Fld label="Estilo visual"><Sel value={style} onChange={setStyle} opts={["Fotografía profesional","Fotografía lifestyle","Ilustración moderna","3D render","Minimalista","Cinematográfico","Editorial"]}/></Fld>
@@ -1391,7 +1428,7 @@ function ImplementHub(){
     <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
       <div style={{flex:"0 0 380px",maxWidth:"100%"}}><Crd>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
           <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
           <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Btn primary disabled={!nm||!ni} color={C.rose} onClick={()=>
@@ -1463,6 +1500,7 @@ function Clients(){
   const[,forceUpdate]=useState(0);
   const[logSearch,setLogSearch]=useState("");
   const[logToolFilter,setLogToolFilter]=useState("all");
+  const[shareLink,setShareLink]=useState("");
 
   useEffect(()=>{
     db.getClients().then(data=>{
@@ -1603,7 +1641,14 @@ function Clients(){
             <Btn small primary color={C.teal} onClick={(e)=>{e.stopPropagation();printLOPD(c);}}>LOPD</Btn>
             <Btn small color={C.gold} onClick={(e)=>{e.stopPropagation();navigator.clipboard.writeText(generateLOPD(c));}}>Copiar LOPD</Btn>
             {clientLog.length>0&&<Btn small primary color={C.cyan} onClick={(e)=>{e.stopPropagation();exportLogPDF(clientLog,c.nombre);}}>Log PDF</Btn>}
+            <Btn small primary color={C.green} onClick={async(e)=>{e.stopPropagation();const token=await db.getShareToken(c.id);if(token){const url=window.location.origin+"/api/client-view?token="+token;setShareLink(url);navigator.clipboard.writeText(url);}}}>Compartir</Btn>
             <Btn small color={C.red} onClick={(e)=>{e.stopPropagation();deleteClient(c.id);}}>Eliminar</Btn>
+          </div>
+          {shareLink&&sel===c.id&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.teal,borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,color:C.teal,fontWeight:600}}>Enlace copiado:</span>
+            <span style={{fontSize:11,color:C.tx,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{shareLink}</span>
+            <span onClick={()=>window.open(shareLink,"_blank")} style={{fontSize:11,color:C.blue,cursor:"pointer",whiteSpace:"nowrap"}}>Abrir</span>
+          </div>}
           </div>
           {lopdView===c.id&&<div style={{marginTop:10,background:C.bg,border:"1px solid "+C.bd,borderRadius:8,padding:16,maxHeight:300,overflowY:"auto"}}>
             <div style={{fontSize:11,color:C.w,lineHeight:1.7,whiteSpace:"pre-wrap",fontFamily:"monospace"}}>{generateLOPD(c)}</div>
@@ -1726,7 +1771,7 @@ function ContentMultiplier(){
     <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
       <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
           <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
           <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
           <Fld label="Tipo de contenido origen"><Sel value={srcType} onChange={setSrcType} opts={["Texto libre","Artículo blog","Descripción servicio","Noticia/novedad","Caso de éxito","Oferta/promoción","Evento","FAQ / Pregunta frecuente"]}/></Fld>
@@ -1827,7 +1872,7 @@ function ProposalGenerator(){
     <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
       <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
           <Fld label="Nombre negocio *"><Inp value={nm} onChange={sNm} ph="Clinica Dental Sonrisa"/></Fld>
           <Fld label="Persona de contacto"><Inp value={contacto} onChange={sContacto} ph="Dra. Maria Lopez"/></Fld>
           <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
@@ -1882,7 +1927,7 @@ function MultiCampaign(){
     <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
       <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
           <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
           <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
           <Fld label="Objetivo de la campaña"><Sel value={obj} onChange={sObj} opts={["Lanzar servicio/tratamiento nuevo","Promoción estacional (Navidad, verano, vuelta cole...)","Captar primeras consultas","Evento jornada de puertas abiertas","Reactivar pacientes inactivos","Black Friday / oferta limitada","Posicionar como referente","Inauguración / nueva apertura"]}/></Fld>
@@ -1980,7 +2025,7 @@ Al final: RESUMEN PRODUCCION con total piezas, orden prioridad lanzamiento, plan
     <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
       <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
           <TreatmentSelector niche={ni} treatment={tx} setTreatment={sTx} customTx={ctx} setCustomTx={sCtx} label="Servicio foco de la campaña"/>
           <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
           <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
@@ -2055,7 +2100,7 @@ function PredictiveDashboard(){
     <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
       <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
           <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
           <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Fld label="Meses activo con marketing digital"><Sel value={mesesActivo} onChange={sMesesActivo} opts={["Empezando (0 meses)","1-2 meses","3 meses","6 meses","12 meses","+12 meses"]}/></Fld>
