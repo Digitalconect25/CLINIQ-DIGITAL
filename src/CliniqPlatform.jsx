@@ -336,90 +336,98 @@ function Out({content,loading,label}){
 
 /* ── AI ENGINE ── */
 function buildSys(nicheResolved, geo){
-  return `Eres un estratega de marketing digital de elite especializado en negocios locales y clinicas sanitarias en Espana. Generas contenido que posiciona en buscadores y convierte visitantes en pacientes o clientes.
+  return `Estratega de marketing digital para negocios locales en Espana. Nicho: ${nicheResolved}. Geo: ${geo}.
+Reglas: Terminologia profesional del sector. SEO local (keyword en titulo, H2s, primer y ultimo parrafo, densidad 1-2%, LSI keywords, geo-keywords "[servicio] + [ciudad/barrio]"). Sector salud: cumplir regulacion publicitaria sanitaria espanola, sin claims de resultado. Texto limpio sin markdown/asteriscos/almohadillas. Espanol de Espana, comillas rectas, sin emojis. No inventar datos: usar [COMPLETAR] si faltan. Recomendaciones accionables y concretas. Precision sobre extension.`;
+}
 
-NICHO ACTUAL: ${nicheResolved}
-GEO-LOCALIZACION: ${geo}
-
-ADAPTACION AL NICHO:
-- Detecta el sector y adapta terminologia, perfil de cliente, ciclo de decision, objeciones habituales y tono.
-- Sector sanitario: aplica regulacion publicitaria sanitaria espanola (RD 1907/1996, Ley 34/1988 General de Publicidad, normativa AEMPS, normativa autonomica). Sin claims de resultado, sin trivializar procedimientos.
-- Sector no sanitario: aplica el marco etico y regulatorio correspondiente.
-- Terminologia exacta del profesional del sector, no generica.
-
-SEO OBLIGATORIO:
-- Keyword principal natural en titulo, primer parrafo, al menos 2 subtitulos, ultimo parrafo.
-- Densidad keyword 1-2%. Sin keyword stuffing.
-- Variaciones semanticas y long-tail (LSI keywords).
-- Estructura H1 > H2 > H3 jerarquica.
-- Parrafos de 3-4 lineas maximas para movil.
-- Preguntas reales de usuarios (People Also Ask).
-- Optimiza para featured snippets cuando corresponda.
-- Sugiere enlaces internos a paginas de servicio y articulos.
-- Cada contenido con UNA intencion de busqueda clara.
-
-GEO-SEO OBLIGATORIO:
-- Localización natural: "en ${geo}", menciones a barrio/zona, referencias locales.
-- Keywords geo: "[servicio] + [ciudad]", "[tratamiento] + [barrio]", "[especialidad] + cerca de mi".
-- Puntos de referencia locales, zonas conocidas, transporte cercano.
-- Prioriza micro-SEO local del barrio sobre SEO generico de ciudad.
-- Comunidad autonoma para SEO regional.
-
-FORMATO: Texto limpio sin markdown, sin asteriscos, sin almohadillas. Saltos de linea para organizar. Comillas rectas. Espanol de Espana.
-Tono: profesional, directo, genera confianza. Sin marketing agresivo.
-
-FIABILIDAD:
-- NUNCA inventes datos, estadisticas, estudios o cifras. Si mencionas un dato, que sea realista y verificable.
-- Informacion insuficiente: usa marcadores [COMPLETAR CON DATO REAL].
-- NUNCA inventes nombres de profesionales, clinicas o direcciones.
-- Cada recomendacion ACCIONABLE: que hacer, como, con que herramienta, en que plazo.
-- Precision sobre extension. Menos texto correcto antes que mucho generico.
-- Datos incompletos: genera con lo disponible y senala que falta.
-- SIEMPRE espanol de Espana, comillas rectas, sin emojis.`;
+async function streamRequest(body,setO,setL,onText){
+  const maxRetries=3;
+  for(let attempt=0;attempt<maxRetries;attempt++){
+    try{
+      const r=await fetch("/api/generate",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+      if(r.status===429||r.status===529){
+        const wait=Math.min(30,(attempt+1)*12);
+        setO(`Limite de velocidad API. Reintentando en ${wait}s... (intento ${attempt+1}/${maxRetries})`);
+        await new Promise(ok=>setTimeout(ok,wait*1000));
+        continue;
+      }
+      if(!r.ok){
+        const errRaw=await r.text();
+        let errMsg;try{const j=JSON.parse(errRaw);errMsg=j.error?.message||j.error||errRaw.slice(0,200);}catch(e){errMsg=errRaw.slice(0,200);}
+        if(typeof errMsg==="string"&&errMsg.includes("rate limit")&&attempt<maxRetries-1){
+          const wait=Math.min(30,(attempt+1)*12);
+          setO(`Limite de velocidad API. Reintentando en ${wait}s... (intento ${attempt+1}/${maxRetries})`);
+          await new Promise(ok=>setTimeout(ok,wait*1000));
+          continue;
+        }
+        setO("ERROR API: "+(typeof errMsg==="string"?errMsg:JSON.stringify(errMsg)));setL(false);return null;
+      }
+      if(!body.stream){
+        const raw=await r.text();
+        let d;try{d=JSON.parse(raw);}catch(pe){setO("Error del servidor: "+raw.slice(0,200));setL(false);return null;}
+        if(d.error){setO("ERROR API: "+(typeof d.error==="string"?d.error:JSON.stringify(d.error)));setL(false);return null;}
+        return d;
+      }
+      const reader=r.body.getReader();
+      const decoder=new TextDecoder();
+      let full="";let buffer="";
+      while(true){
+        const{done,value}=await reader.read();
+        if(done) break;
+        buffer+=decoder.decode(value,{stream:true});
+        const lines=buffer.split("\n");
+        buffer=lines.pop()||"";
+        for(const line of lines){
+          if(!line.startsWith("data: ")) continue;
+          const raw=line.slice(6);
+          if(raw==="[DONE]") continue;
+          try{
+            const ev=JSON.parse(raw);
+            if(ev.type==="error"){
+              const em=ev.error?.message||JSON.stringify(ev.error);
+              if(typeof em==="string"&&em.includes("rate limit")&&attempt<maxRetries-1){
+                const wait=Math.min(30,(attempt+1)*12);
+                setO(`Limite de velocidad API. Reintentando en ${wait}s...`);
+                await new Promise(ok=>setTimeout(ok,wait*1000));
+                full="__RETRY__";break;
+              }
+              setO("ERROR API: "+em);setL(false);return null;
+            }
+            if(ev.type==="content_block_delta"&&ev.delta?.type==="text_delta"&&ev.delta.text){
+              full+=ev.delta.text;
+              setO(full);
+            }
+            if(onText&&ev.type==="content_block_start") onText(ev);
+          }catch(pe){}
+        }
+        if(full==="__RETRY__") break;
+      }
+      if(full==="__RETRY__"){full="";continue;}
+      return full||null;
+    }catch(e){
+      if(attempt<maxRetries-1){
+        setO(`Error de conexion, reintentando en 5s...`);
+        await new Promise(ok=>setTimeout(ok,5000));continue;
+      }
+      setO("Error de conexion: "+e.message);setL(false);return null;
+    }
+  }
+  setO("No se pudo completar la solicitud tras varios intentos. Espera 1 minuto y prueba de nuevo.");
+  setL(false);return null;
 }
 
 async function ai(sysExtra,prompt,setO,setL,niche,geo,logInfo){
   setL(true);setO("");
   const sys=buildSys(niche||"Servicio profesional",geo||"Espana")+"\n\n"+sysExtra;
-  try{
-    const r=await fetch("/api/generate",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4096,stream:true,system:sys,messages:[{role:"user",content:prompt}]})
-    });
-    if(!r.ok){
-      const errRaw=await r.text();
-      let errMsg;try{errMsg=JSON.parse(errRaw).error||errRaw.slice(0,200);}catch(e){errMsg=errRaw.slice(0,200);}
-      setO("ERROR API: "+(typeof errMsg==="string"?errMsg:JSON.stringify(errMsg)));setL(false);return;
-    }
-    const reader=r.body.getReader();
-    const decoder=new TextDecoder();
-    let full="";let buffer="";
-    while(true){
-      const{done,value}=await reader.read();
-      if(done) break;
-      buffer+=decoder.decode(value,{stream:true});
-      const lines=buffer.split("\n");
-      buffer=lines.pop()||"";
-      for(const line of lines){
-        if(!line.startsWith("data: ")) continue;
-        const raw=line.slice(6);
-        if(raw==="[DONE]") continue;
-        try{
-          const ev=JSON.parse(raw);
-          if(ev.type==="error"){setO("ERROR API: "+(ev.error?.message||JSON.stringify(ev.error)));setL(false);return;}
-          if(ev.type==="content_block_delta"&&ev.delta?.type==="text_delta"&&ev.delta.text){
-            full+=ev.delta.text;
-            setO(full);
-          }
-        }catch(pe){}
-      }
-    }
-    if(!full) setO("Sin contenido en la respuesta.");
-    if(full&&!full.startsWith("Error")&&!full.startsWith("ERROR")){
-      const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);
-      logActivity(toolName,logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full);
-    }
-  }catch(e){setO("Error de conexion: "+e.message);}
+  const full=await streamRequest({model:"claude-sonnet-4-20250514",max_tokens:4096,stream:true,system:sys,messages:[{role:"user",content:prompt}]},setO,setL);
+  if(full&&!full.startsWith("Error")&&!full.startsWith("ERROR")){
+    const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);
+    logActivity(toolName,logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full);
+  }
+  if(!full&&!setO.lastVal) setO("Sin contenido en la respuesta.");
   setL(false);
 }
 
@@ -459,29 +467,36 @@ function extractInputs(prompt){
   return inputs;
 }
 
-/* ── AI WITH WEB SEARCH (STREAMING) ── */
+/* ── AI WITH WEB SEARCH (STREAMING + RETRY) ── */
 async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
   setL(true);setO("");
   if(setPhase) setPhase("search");
   const sys=buildSys(niche||"Servicio profesional",geo||"Espana")+"\n\n"+sysExtra;
+  const maxRetries=3;
+  for(let attempt=0;attempt<maxRetries;attempt++){
   try{
     const r=await fetch("/api/generate",{
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
-        model:"claude-sonnet-4-20250514",max_tokens:8192,stream:true,system:sys,
+        model:"claude-sonnet-4-20250514",max_tokens:4096,stream:true,system:sys,
         messages:[{role:"user",content:prompt}],
         tools:[{type:"web_search_20250305",name:"web_search"}]
       })
     });
-    if(!r.ok){
+    if(r.status===429||r.status===529||(r.status>=400&&!r.ok)){
       const errRaw=await r.text();
-      let errMsg;try{errMsg=JSON.parse(errRaw).error||errRaw.slice(0,200);}catch(e){errMsg=errRaw.slice(0,200);}
+      let errMsg;try{const j=JSON.parse(errRaw);errMsg=j.error?.message||j.error||errRaw.slice(0,200);}catch(e){errMsg=errRaw.slice(0,200);}
+      if((r.status===429||r.status===529||(typeof errMsg==="string"&&errMsg.includes("rate limit")))&&attempt<maxRetries-1){
+        const wait=Math.min(30,(attempt+1)*12);
+        setO(`Limite de velocidad API. Reintentando en ${wait}s... (${attempt+1}/${maxRetries})`);
+        await new Promise(ok=>setTimeout(ok,wait*1000));continue;
+      }
       setO("ERROR API: "+(typeof errMsg==="string"?errMsg:JSON.stringify(errMsg)));
       if(setPhase) setPhase("done");setL(false);return;
     }
     const reader=r.body.getReader();
     const decoder=new TextDecoder();
-    let full="";let buffer="";let searchingPhase=true;let sources=[];
+    let full="";let buffer="";let searchingPhase=true;let sources=[];let retryNeeded=false;
     while(true){
       const{done,value}=await reader.read();
       if(done) break;
@@ -494,41 +509,36 @@ async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
         if(raw==="[DONE]") continue;
         try{
           const ev=JSON.parse(raw);
-          if(ev.type==="error"){setO("ERROR API: "+(ev.error?.message||JSON.stringify(ev.error)));if(setPhase) setPhase("done");setL(false);return;}
+          if(ev.type==="error"){
+            const em=ev.error?.message||JSON.stringify(ev.error);
+            if(typeof em==="string"&&em.includes("rate limit")&&attempt<maxRetries-1){
+              const wait=Math.min(30,(attempt+1)*12);
+              setO(`Limite de velocidad. Reintentando en ${wait}s...`);
+              await new Promise(ok=>setTimeout(ok,wait*1000));retryNeeded=true;break;
+            }
+            setO("ERROR API: "+em);if(setPhase) setPhase("done");setL(false);return;
+          }
           if(ev.type==="content_block_start"){
-            if(ev.content_block?.type==="web_search_tool_result"){
-              if(searchingPhase&&setPhase){setPhase("analyze");searchingPhase=false;}
-            }
-            if(ev.content_block?.type==="text"&&searchingPhase&&setPhase){setPhase("analyze");searchingPhase=false;}
-          }
-          if(ev.type==="content_block_delta"&&ev.delta?.type==="text_delta"&&ev.delta.text){
-            full+=ev.delta.text;
-            setO(full);
-          }
-          if(ev.type==="content_block_start"&&ev.content_block?.type==="web_search_tool_result"){
-            const sr=ev.content_block;
-            if(sr.content){
-              sr.content.filter(c=>c.type==="web_search_result"&&c.url&&c.title).forEach(wp=>{
-                sources.push({title:wp.title,url:wp.url});
-              });
+            if((ev.content_block?.type==="web_search_tool_result"||ev.content_block?.type==="text")&&searchingPhase&&setPhase){setPhase("analyze");searchingPhase=false;}
+            if(ev.content_block?.type==="web_search_tool_result"&&ev.content_block.content){
+              ev.content_block.content.filter(c=>c.type==="web_search_result"&&c.url&&c.title).forEach(wp=>sources.push({title:wp.title,url:wp.url}));
             }
           }
+          if(ev.type==="content_block_delta"&&ev.delta?.type==="text_delta"&&ev.delta.text){full+=ev.delta.text;setO(full);}
         }catch(pe){}
       }
+      if(retryNeeded) break;
     }
-    if(sources.length>0){
-      full+="\n\n---\nFUENTES CONSULTADAS EN INTERNET:\n";
-      sources.forEach(s=>{full+=`- ${s.title}: ${s.url}\n`;});
-      setO(full);
-    }
-    if(!full) setO("No se encontraron resultados. Verifica los datos e intenta de nuevo.");
-    if(full){
-      const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);
-      logActivity(toolName+" (Web)",logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full);
-    }
-  }catch(e){setO("Error de conexion: "+e.message);}
-  if(setPhase) setPhase("done");
-  setL(false);
+    if(retryNeeded) continue;
+    if(sources.length>0){full+="\n\n---\nFUENTES CONSULTADAS:\n";sources.forEach(s=>{full+=`- ${s.title}: ${s.url}\n`;});setO(full);}
+    if(!full) setO("Sin resultados. Verifica los datos e intenta de nuevo.");
+    if(full){const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);logActivity(toolName+" (Web)",logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full);}
+    if(setPhase) setPhase("done");setL(false);return;
+  }catch(e){
+    if(attempt<maxRetries-1){setO("Error de conexion, reintentando en 5s...");await new Promise(ok=>setTimeout(ok,5000));continue;}
+    setO("Error de conexion: "+e.message);
+  }}
+  if(setPhase) setPhase("done");setL(false);
 }
 
 /* ── PROGRESS RING (SVG) ── */
@@ -1442,103 +1452,24 @@ function ContentMultiplier(){
           <Fld label="Contenido origen *"><Txa value={src} onChange={setSrc} ph="Pega aqui el texto base, describe el tema o escribe la idea principal. La IA lo adaptara a 8 canales diferentes con formato, tono y longitud optimizados para cada uno..." rows={8}/></Fld>
           <Btn primary disabled={!src||!ni} color={C.cyan} onClick={()=>{
             setChTab("all");
-            ai("Eres un equipo completo de content marketing. Tu trabajo: tomar UN contenido origen y transformarlo en 8 piezas COMPLETAMENTE DIFERENTES, cada una optimizada para su canal. NO copies el mismo texto con ligeras variaciones, ADAPTA profundamente: formato, tono, longitud, estructura, gancho, CTA. Cada pieza debe parecer creada nativamente para ese canal por un especialista.",
+            ai("Equipo de content marketing. Transforma UN contenido en 8 piezas DIFERENTES optimizadas por canal. No recicles texto, adapta formato/tono/estructura/gancho/CTA nativamente.",
             `CONTENIDO ORIGEN (${srcType}):
 """
 ${src}
 """
+Centro: ${nm||"[Nombre]"}. Sector: ${nR}. Geo: ${geo}.
 
-Centro: ${nm||"[Nombre]"}. Sector: ${nR}. Localizacion: ${geo}.
+8 VERSIONES COMPLETAS LISTAS PARA PUBLICAR (separa cada canal con ========):
 
-GENERA 8 VERSIONES COMPLETAS LISTAS PARA PUBLICAR:
-
-========================================
-1. INSTAGRAM POST (Carrusel / Imagen)
-========================================
-- Caption completo (max 2200 caracteres) con gancho en primera linea
-- Estructura: gancho > problema > solucion > CTA > hashtags
-- 15 hashtags estrategicos (5 generales + 5 nicho + 5 locales)
-- Texto sugerido para cada slide si es carrusel (5-7 slides)
-- Mejor hora publicacion y dia de la semana
-
-========================================
-2. INSTAGRAM REELS (Script 30-60s)
-========================================
-- Gancho primeros 3 segundos (lo mas importante)
-- Script palabra por palabra con marcas de tiempo
-- Texto en pantalla por escena
-- Audio sugerido / trending sound
-- CTA hablado + texto en pantalla
-- Caption para el reel
-
-========================================
-3. TIKTOK (Script 15-45s)
-========================================
-- Gancho viral (patron de TikTok: "POV:", "Esto no te lo dicen...", "Lo que nadie te cuenta...")
-- Script conversacional en primera persona
-- Transiciones sugeridas
-- Texto overlay por escena
-- Trending hashtags TikTok
-- Formato nativo TikTok (no reciclaje de Instagram)
-
-========================================
-4. BLOG SEO (Articulo completo)
-========================================
-- Title tag optimizado (max 60 chars, con keyword + ciudad)
-- Meta description (max 155 chars)
-- H1 + estructura H2/H3
-- Articulo de 600-800 palabras con keyword density 1-2%
-- FAQ con 3 preguntas (schema FAQ)
-- CTA interno + enlaces sugeridos
-- Keywords secundarias integradas
-
-========================================
-5. EMAIL MARKETING
-========================================
-- Subject line (3 opciones con distinto enfoque)
-- Preview text
-- Cuerpo del email completo (estructura: gancho > valor > CTA)
-- Version texto plano
-- Segmento recomendado
-- Mejor dia/hora envio
-- Metricas objetivo (open rate, CTR)
-
-========================================
-6. WHATSAPP BUSINESS
-========================================
-- Mensaje principal (max 160 palabras, tono conversacional)
-- Variante con enlace
-- Variante con pregunta para engagement
-- Lista de difusion vs grupo: recomendacion
-- Cumplimiento LOPD/RGPD
-- Timing recomendado
-
-========================================
-7. GOOGLE BUSINESS POST
-========================================
-- Tipo: Novedad / Oferta / Evento (el mas apropiado)
-- Texto optimizado (max 1500 chars, primeros 100 visibles)
-- CTA de Google (Reservar, Mas info, Llamar, etc.)
-- Keywords locales integradas
-- Imagen sugerida (descripcion)
-- Frecuencia publicacion recomendada
-
-========================================
-8. LINKEDIN
-========================================
-- Post profesional (tono B2B, autoridad, datos)
-- Gancho primera linea (visible sin "ver mas")
-- Estructura: insight > desarrollo > conclusion > pregunta engagement
-- Sin hashtags excesivos (max 5)
-- Mencion a tendencia del sector si aplica
-- Mejor hora publicacion
-
-========================================
-RESUMEN CALENDARIO
-========================================
-- Orden recomendado de publicacion (que va primero)
-- Calendario semanal sugerido
-- Notas de adaptacion entre canales`,sO,sL,nR,geo,
+1. INSTAGRAM POST: caption completo con gancho primera linea, 15 hashtags (5 generales+5 nicho+5 locales), slides si carrusel, mejor hora
+2. INSTAGRAM REELS (30-60s): gancho 3s, script con tiempos, texto pantalla, audio sugerido, caption
+3. TIKTOK (15-45s): gancho viral nativo TikTok, script 1a persona, overlay, trending hashtags
+4. BLOG SEO: title tag (60 chars+keyword+ciudad), meta description, H1/H2/H3, articulo 600-800 palabras, FAQ x3, CTA
+5. EMAIL: 3 subject lines, preview text, cuerpo completo, mejor dia/hora
+6. WHATSAPP: mensaje 160 palabras, variante con enlace, variante engagement, cumplimiento RGPD
+7. GOOGLE BUSINESS POST: tipo apropiado, texto optimizado, CTA Google, keywords locales
+8. LINKEDIN: tono B2B, gancho primera linea, max 5 hashtags
+CALENDARIO: orden publicacion + planificacion semanal`,sO,sL,nR,geo,
             {tool:"Multiplicador Contenido",client:nm||"Sin asignar",inputs:{tipo:srcType,origen:src.slice(0,80)}});
           }}>Multiplicar a 8 Canales</Btn>
         </div>
@@ -1625,75 +1556,20 @@ function ProposalGenerator(){
           <Fld label="Competencia conocida"><Inp value={comp} onChange={sComp} ph="Nombres de competidores directos"/></Fld>
           <Fld label="Notas adicionales"><Txa value={notas} onChange={sNotas} ph="Contexto del cliente, objeciones, puntos clave..." rows={3}/></Fld>
           <Btn primary disabled={!nm||!ni||!ci} color={C.gold} onClick={()=>
-            ai("Eres un director comercial de una agencia de marketing digital premium. Genera propuestas comerciales que CIERRAN VENTAS. La propuesta debe ser profesional, persuasiva, basada en datos realisticos del sector y la zona, con ROI estimado conservador y creible. NO uses promesas vacias ni marketing agresivo. Cada numero debe ser realista y justificable.",
-            `PROPUESTA COMERCIAL COMPLETA para: "${nm}"
-Contacto: ${contacto||"[Responsable]"}. Sector: ${nR}. Localizacion: ${geo}. Web: ${web||"Sin web"}. Plan: ${plan} (${PLANS.find(p=>p.lb===plan)?.price||"497"} EUR/mes). Objetivo: ${obj||"Captar nuevos clientes"}. Competencia: ${comp||"No especificada"}. Notas: ${notas||"Ninguna"}.
+            ai("Director comercial de agencia de marketing digital. Propuestas profesionales, persuasivas, con ROI realista y conservador. Sin promesas vacias.",
+            `PROPUESTA COMERCIAL para: "${nm}". Contacto: ${contacto||"[Responsable]"}. Sector: ${nR}. Geo: ${geo}. Web: ${web||"N/A"}. Plan: ${plan} (${PLANS.find(p=>p.lb===plan)?.price||"497"} EUR/mes). Objetivo: ${obj||"Captar clientes"}. Competencia: ${comp||"N/A"}. Notas: ${notas||"N/A"}.
 
-GENERA PROPUESTA PROFESIONAL COMPLETA:
-
-1. RESUMEN EJECUTIVO
-- Situacion actual detectada (basada en lo que sabemos)
-- Oportunidad de mercado en ${geo} para ${nR}
-- Propuesta de valor en 3 lineas
-
-2. DIAGNOSTICO INICIAL
-- Estado presencia digital estimada
-- Gaps principales detectados
-- Comparativa con competencia local
-- Potencial desaprovechado
-
-3. ESTRATEGIA PROPUESTA
-- Objetivos SMART a 3, 6 y 12 meses
-- Lineas de accion principales
-- Canales prioritarios y por que
-- Diferenciacion vs competencia
-
-4. PLAN DE SERVICIOS INCLUIDOS
-Detalla EXACTAMENTE que incluye el plan ${plan}:
-- Servicios mensuales con descripcion y frecuencia
-- Entregables concretos (que recibe el cliente cada mes)
-- Herramientas y plataformas que se gestionan
-- Reuniones y reporting
-
-5. TIMELINE DE IMPLEMENTACION
-- Mes 1: Setup y fundamentos (detalla)
-- Mes 2-3: Activacion y crecimiento (detalla)
-- Mes 4-6: Optimizacion y escalado (detalla)
-- Mes 7-12: Consolidacion y expansión (detalla)
-
-6. PROYECCION DE RESULTADOS (ROI)
-ESTIMACIONES CONSERVADORAS Y REALISTAS para ${nR} en ${geo}:
-- Visitas web: actual estimado vs proyeccion 6 y 12 meses
-- Posicionamiento SEO: keywords objetivo y posiciones esperadas
-- Google Maps: visibilidad y acciones esperadas
-- Consultas/leads mensuales: proyeccion realista
-- Tasa conversion consulta-a-paciente del sector
-- Facturacion adicional estimada (ticket medio del sector x conversiones)
-- ROI: inversion vs retorno estimado
-- IMPORTANTE: usa datos del sector en Espana, no inventes cifras infladas
-
-7. INVERSION
-- Precio mensual: ${PLANS.find(p=>p.lb===plan)?.price||"497"} EUR + IVA
-- Setup inicial si aplica
-- Compromiso minimo recomendado (y por que)
-- Comparativa con coste de un empleado dedicado
-- Comparativa con coste de captacion por Google Ads
-
-8. GARANTIAS Y DIFERENCIADORES
-- Que nos diferencia de otras agencias
-- Compromiso de transparencia y reporting
-- Sin permanencia forzada (la calidad retiene)
-- Equipo especializado en ${nR}
-
-9. SIGUIENTE PASO
-- CTA claro: que debe hacer el cliente ahora
-- Proceso de onboarding resumido
-- Disponibilidad para reunion
-
-10. CONDICIONES
-- Forma de pago, facturacion, plazos
-- Que necesitamos del cliente para empezar
-- Validez de la propuesta (30 dias)`,sO,sL,nR,geo,
+Secciones:
+1. RESUMEN EJECUTIVO: situacion actual, oportunidad mercado ${geo}, propuesta valor
+2. DIAGNOSTICO: presencia digital, gaps, comparativa competencia
+3. ESTRATEGIA: objetivos SMART 3/6/12 meses, canales prioritarios, diferenciacion
+4. SERVICIOS PLAN ${plan}: detalle exacto servicios mensuales, entregables, herramientas, reuniones
+5. TIMELINE: mes 1 setup, mes 2-3 activacion, mes 4-6 optimizacion, mes 7-12 consolidacion
+6. ROI: proyeccion conservadora visitas/SEO/Maps/leads/conversion/facturacion adicional vs inversion (datos sector Espana reales)
+7. INVERSION: ${PLANS.find(p=>p.lb===plan)?.price||"497"} EUR+IVA, setup, compromiso minimo, comparativa empleado y Google Ads
+8. GARANTIAS: diferenciadores, transparencia, sin permanencia, equipo especializado ${nR}
+9. SIGUIENTE PASO: CTA, onboarding, disponibilidad
+10. CONDICIONES: pago, plazos, validez 30 dias`,sO,sL,nR,geo,
             {tool:"Propuestas Comerciales",client:nm,inputs:{plan:plan,objetivo:obj}})
           }>Generar Propuesta</Btn>
           {o&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
@@ -1734,82 +1610,20 @@ function MultiCampaign(){
           <Fld label="Presupuesto ads (opcional)"><Sel value={budget} onChange={sBudget} opts={["Sin inversión en ads","100-300 EUR","300-500 EUR","500-1000 EUR","1000-2000 EUR","+2000 EUR"]}/></Fld>
           <Fld label="Contexto adicional"><Txa value={notas} onChange={sNotas} ph="Detalles especificos: oferta concreta, fecha evento, profesional destacado..." rows={3}/></Fld>
           <Btn primary disabled={!srv||!ni||!nm} color={C.rose} onClick={()=>
-            ai("Eres un director de campanas multicanal para negocios locales. Generas campanas COORDINADAS donde cada canal refuerza a los demas con mensajes consistentes pero adaptados. No son piezas sueltas, es una orquestacion estrategica con timing preciso.",
-            `CAMPAÑA MULTICANAL COMPLETA
-Centro: "${nm}". Sector: ${nR}. Localizacion: ${geo}.
-Objetivo: ${obj}. Servicio/tema: "${srv}". Duracion: ${dur}. Presupuesto ads: ${budget}. Notas: ${notas||"Ninguna"}.
+            ai("Director de campanas multicanal para negocios locales. Campanas COORDINADAS donde cada canal refuerza a los demas con timing preciso.",
+            `CAMPAÑA MULTICANAL: "${nm}" (${nR}) en ${geo}. Objetivo: ${obj}. Servicio: "${srv}". Duracion: ${dur}. Ads: ${budget}. Notas: ${notas||"N/A"}.
 
-GENERA CAMPAÑA COORDINADA:
-
-1. BRIEF ESTRATEGICO
-- Concepto creativo central (naming campaña, claim, visual key)
-- Mensaje principal (1 frase)
-- Publico objetivo primario y secundario
-- Propuesta de valor diferencial
-- Tono y estilo visual
-
-2. ARQUITECTURA DE CAMPAÑA
-- Fases: Teaser > Lanzamiento > Sostenimiento > Cierre/Urgencia
-- Calendario visual semana a semana
-- Que canal activa en que fase y por que
-
-3. PRE-LANZAMIENTO (Teaser)
-- Stories/reels de anticipacion (scripts completos)
-- Email de avance a base de datos
-- WhatsApp a pacientes/clientes VIP
-- Timing exacto
-
-4. LANZAMIENTO
-- Post principal Instagram (copy completo + hashtags)
-- Reel/TikTok de lanzamiento (script + texto pantalla)
-- Google Business Post
-- Email de lanzamiento (subject + body)
-- WhatsApp difusion
-- Stories secuencia (5 stories con contenido cada una)
-- LinkedIn si B2B
-
-5. SOSTENIMIENTO (contenido semanal)
-Calendario dia a dia con contenido COMPLETO para cada publicacion:
-- Lunes: [canal + pieza + copy completo]
-- Martes: [canal + pieza + copy completo]
-- Miercoles: [canal + pieza + copy completo]
-- Jueves: [canal + pieza + copy completo]
-- Viernes: [canal + pieza + copy completo]
-- Sabado/Domingo: [si aplica]
-Repetir para cada semana de la campaña.
-
-6. FASE URGENCIA / CIERRE
-- Countdown en stories
-- Email de ultima oportunidad
-- WhatsApp de cierre
-- Post recordatorio
-
-7. PAID MEDIA (si presupuesto > 0)
-${budget!=="Sin inversión en ads"?`- Distribucion presupuesto ${budget} por canal y fase
-- Segmentacion de audiencias (edad, zona ${geo}, intereses)
-- Formatos de anuncio recomendados
-- Copy de anuncios (3 variantes)
-- Metricas objetivo por canal (CPL, CPA, CTR)
-- Remarketing estrategia`:"- Campaña 100% organica: maximizar alcance sin inversion"}
-
-8. CONTENIDO VISUAL (briefing)
-- Key visual: descripcion detallada para diseno o IA
-- Paleta de colores sugerida
-- Tipografias recomendadas
-- Plantillas necesarias (stories, posts, banners)
-- Prompts de IA para generar imagenes principales
-
-9. MEDICION Y KPIs
-- KPIs por canal con objetivos numericos realistas
-- Dashboard de seguimiento semanal
-- Checklist de optimizacion mid-campaign
-- Criterios para ajustar en tiempo real
-
-10. POST-CAMPAÑA
-- Que hacer con los leads generados
-- Secuencia de seguimiento post-campaña
-- Analisis de resultados (plantilla)
-- Aprendizajes para proxima campaña`,sO,sL,nR,geo,
+Secciones:
+1. BRIEF: concepto creativo (naming, claim, visual key), mensaje principal, publico primario/secundario, tono
+2. ARQUITECTURA: fases Teaser>Lanzamiento>Sostenimiento>Cierre, calendario semana a semana, canal por fase
+3. TEASER: scripts stories/reels anticipacion, email avance, WhatsApp VIP
+4. LANZAMIENTO: post IG (copy+hashtags), reel/TikTok script, GBP, email (subject+body), WhatsApp difusion, 5 stories
+5. SOSTENIMIENTO: calendario DIA A DIA con copy COMPLETO por publicacion (Lun-Vie), repetir cada semana
+6. CIERRE: countdown stories, email urgencia, WhatsApp cierre
+7. PAID MEDIA: ${budget!=="Sin inversión en ads"?`distribucion ${budget} por canal/fase, segmentacion ${geo}, 3 variantes copy anuncios, remarketing`:"100% organico"}
+8. VISUAL: key visual descripcion, paleta, prompts IA imagenes principales
+9. KPIs: objetivos numericos por canal, checklist optimizacion
+10. POST-CAMPAÑA: seguimiento leads, analisis resultados, aprendizajes`,sO,sL,nR,geo,
             {tool:"Campañas Multicanal",client:nm,inputs:{objetivo:obj,servicio:srv,duracion:dur}})
           }>Generar Campaña Completa</Btn>
         </div>
@@ -1834,360 +1648,49 @@ function MetaAdsPro(){
 
   const genStrategy=()=>{
     setTab("strategy");
-    aiSearch("Eres un Media Buyer senior especializado en Meta Ads (Facebook + Instagram) para negocios locales en Espana. Tienes experiencia real gestionando campanas del sector sanitario y servicios profesionales con presupuestos de 300 a 5000 EUR/mes. Conoces las politicas publicitarias de Meta para el sector salud. Busca datos reales de benchmarks del sector. Genera recomendaciones ACCIONABLES Y REALISTAS, no teoricas. Responde en espanol de Espana.",
-    `ESTRATEGIA META ADS PROFESIONAL COMPLETA
-Centro: "${nm||"[Nombre]"}". Sector: ${nR}. Servicio foco: "${srv||"General"}". Localizacion: ${geo}. Web: ${web||"No proporcionada"}.
-Objetivo: ${obj}. Presupuesto: ${budget}. Duracion: ${dur}. Experiencia previa ads: ${prevAds}.
-Audiencia: ${audience||"Por definir"}. Competencia: ${comp||"No especificada"}. Diferenciador: ${usp||"No especificado"}. Oferta: ${offer||"Sin oferta especifica"}.
+    aiSearch("Media Buyer senior de Meta Ads para negocios locales en Espana. Busca benchmarks reales del sector. Recomendaciones accionables, no teoricas.",
+    `ESTRATEGIA META ADS para: "${nm||"[Nombre]"}" (${nR}) en ${geo}. Servicio: "${srv||"General"}". Web: ${web||"N/A"}.
+Objetivo: ${obj}. Presupuesto: ${budget}. Duracion: ${dur}. Exp. previa: ${prevAds}.
+Audiencia: ${audience||"Por definir"}. Competencia: ${comp||"N/A"}. USP: ${usp||"N/A"}. Oferta: ${offer||"N/A"}.
 
-BUSCA: CPM medio en Espana para ${nR}, CTR benchmark sector salud/servicios, coste por lead medio sector, mejores practicas Meta Ads ${nR} Espana 2025-2026.
+Busca: CPM/CTR/CPL benchmarks para ${nR} en Espana, politicas Meta sector salud.
 
-GENERA ESTRATEGIA COMPLETA:
-
-1. DIAGNOSTICO PRE-CAMPANA
-- Evaluacion del objetivo vs presupuesto (es realista? que esperar?)
-- Analisis de la competencia publicitaria en Meta para ${nR} en ${geo}
-- Politicas de Meta Ads que aplican al sector (restricciones salud, claims prohibidos, audiencias limitadas)
-- Estado del pixel/CAPI: que necesita tener configurado antes de lanzar
-- Requisitos legales (LOPD, consentimiento cookies, politica privacidad)
-
-2. ARQUITECTURA DE CAMPANAS
-Estructura EXACTA para configurar en Meta Ads Manager:
-
-CAMPANA 1 - PROSPECCION FRIA
-- Objetivo de campana en Meta: [especificar exacto]
-- Optimizacion de entrega: [especificar]
-- Presupuesto diario recomendado: [calcular del total]
-- Duracion: [especificar]
-
-  Conjunto de anuncios 1A - Intereses amplios
-  - Segmentacion: edad, genero, ubicacion (radio km desde ${ci}), intereses [listar 8-12 intereses especificos del sector]
-  - Ubicaciones: [Feed, Stories, Reels - recomendar cuales y por que]
-  - Exclusiones: [que excluir]
-  
-  Conjunto de anuncios 1B - Lookalike (si hay datos)
-  - Fuente del lookalike: [especificar]
-  - Porcentaje: [1%, 2%?]
-  - Ubicaciones: [recomendar]
-
-CAMPANA 2 - RETARGETING
-- Objetivo: [especificar]
-- Presupuesto diario: [calcular]
-- Ventanas de retargeting: [visitantes web 7d, 14d, 30d; engagement IG/FB]
-
-  Conjunto de anuncios 2A - Visitantes web
-  - Audiencia: [configuracion exacta]
-  - Frecuencia objetivo: [especificar]
-  
-  Conjunto de anuncios 2B - Engagement social
-  - Audiencia: [personas que interactuaron con perfil IG/FB]
-
-${parseFloat(budget)>800||budget.includes("1000")||budget.includes("2000")||budget.includes("5000")?`CAMPANA 3 - CONVERSION DIRECTA
-- Solo si presupuesto lo permite
-- Objetivo: Conversiones
-- Audiencia: combinacion de senales calientes`:""}
-
-3. DISTRIBUCION DE PRESUPUESTO
-- Desglose exacto del presupuesto ${budget} por campana, por dia, por semana
-- Fase de aprendizaje: cuanto destinar y durante cuanto tiempo
-- Fase de optimizacion: cuando y como redistribuir
-- Reserva para testing creativo: [porcentaje]
-- Tabla con distribucion semanal
-
-4. RECOMENDACION DE FORMATO: IMAGEN vs VIDEO vs CARRUSEL
-Para CADA conjunto de anuncios, recomienda el formato optimo y JUSTIFICA con datos del sector:
-
-FORMATO A - IMAGEN ESTATICA
-- Cuando usar: [escenarios concretos]
-- Tamanos requeridos: 1080x1080 (feed), 1080x1920 (stories/reels)
-- Numero de variantes a crear: [minimo 3-4]
-- Ventajas para ${nR}: [especificar]
-- CPM/CTR esperado vs otros formatos
-
-FORMATO B - VIDEO
-- Cuando usar: [escenarios]
-- Duraciones optimas: 6s, 15s, 30s (para que sirve cada una)
-- Formatos: 1:1 (feed), 9:16 (stories/reels), 4:5 (feed vertical)
-- Ventajas para ${nR}: [especificar]
-- CPM/CTR esperado
-
-FORMATO C - CARRUSEL
-- Cuando usar: [escenarios]
-- Numero optimo de tarjetas: [especificar]
-- Estructura narrativa recomendada por tarjeta
-- Ventajas para ${nR}
-
-VEREDICTO: Para ${nR} con objetivo "${obj}" y presupuesto ${budget}, el formato principal deberia ser [X] porque [justificacion con datos]. Complementar con [Y] para [razon].
-
-5. CREATIVIDADES - ANUNCIOS COMPLETOS (6 anuncios)
-
-ANUNCIO 1 - IMAGEN PRINCIPAL (Prospeccion)
-- Formato: [1080x1080 o 1080x1920]
-- Copy primario (texto principal): [TEXTO COMPLETO max 125 chars visibles]
-- Titulo: [max 40 chars]
-- Descripcion: [max 30 chars]
-- CTA button: [Reservar, Mas informacion, Enviar mensaje, etc.]
-- Prompt EXACTO para generar la imagen con IA (Midjourney/DALL-E):
-  """
-  [Prompt detallado y profesional en ingles, con estilo fotografico realista, iluminacion, composicion, elementos del sector ${nR}, que transmita confianza y profesionalidad. NO incluir texto en la imagen. Especificar --ar 1:1 o --ar 9:16]
-  """
-- Negative prompt: [que evitar]
-- Notas para diseñador: [si se usa fotografía real en vez de IA]
-
-ANUNCIO 2 - IMAGEN STORIES/REELS (Prospeccion)
-- Formato: 1080x1920
-- Copy, titulo, descripcion, CTA
-- Prompt IA imagen (9:16 vertical)
-- Overlay de texto sugerido (posicion, tamaño, contenido)
-
-ANUNCIO 3 - CARRUSEL EDUCATIVO (Prospeccion)
-- Numero de tarjetas: [4-6]
-- Para CADA tarjeta: titulo + descripcion + prompt IA imagen
-- Copy principal del anuncio
-- CTA
-
-ANUNCIO 4 - VIDEO SCRIPT (Prospeccion)
-- Duracion: [15s o 30s]
-- Guion segundo a segundo con indicaciones visuales
-- Texto overlay por escena
-- Musica/audio sugerido
-- Thumbnail: prompt IA para miniatura
-- Copy del anuncio
-
-ANUNCIO 5 - RETARGETING IMAGEN (Retargeting)
-- Copy con urgencia suave / social proof
-- Prompt IA imagen (diferente al de prospeccion, mas cercano/testimonial)
-- CTA directo
-
-ANUNCIO 6 - RETARGETING CARRUSEL TESTIMONIOS (Retargeting)
-- Estructura: testimonios + resultados + CTA
-- Prompt IA por tarjeta
-- Copy del anuncio
-
-6. TEXTOS PUBLICITARIOS (A/B TESTING)
-Para cada anuncio, genera 3 variantes del copy:
-- Variante A: Enfoque emocional/dolor
-- Variante B: Enfoque racional/datos
-- Variante C: Enfoque social proof/autoridad
-Todos cumpliendo politicas de Meta para ${nR}.
-
-7. LANDING PAGE / DESTINO
-- Que pagina de destino usar y por que
-- Elementos obligatorios en la landing para maximizar conversion
-- Coherencia mensaje anuncio-landing (message match)
-- Formulario: campos minimos recomendados
-- Tracking: eventos de pixel a configurar (ViewContent, Lead, Schedule, etc.)
-
-8. CONFIGURACION PIXEL Y TRACKING
-- Eventos estandar a configurar: [listar cada uno]
-- Conversiones personalizadas si aplican
-- CAPI (Conversions API): recomendacion de implementacion
-- UTMs para cada campana/conjunto
-
-9. PROYECCION DE RESULTADOS (REALISTA)
-Con presupuesto ${budget} en ${dur}, para ${nR} en ${geo}:
-
-Tabla de estimacion CONSERVADORA:
-| Metrica | Estimacion baja | Estimacion media | Estimacion alta |
-| Impresiones/mes | | | |
-| Alcance | | | |
-| CTR | | | |
-| Clics al sitio | | | |
-| CPM | | | |
-| CPC | | | |
-| Leads/consultas | | | |
-| Coste por lead | | | |
-| Tasa conversion lead-paciente | | | |
-| Nuevos pacientes/mes | | | |
-| Facturacion estimada | | | |
-| ROAS | | | |
-
-IMPORTANTE: Usa benchmarks REALES del sector ${nR} en Espana. CPL tipico, ROAS tipico, tasas de conversion. No infles numeros.
-
-10. CALENDARIO DE OPTIMIZACION
-- Dia 1-3: [que hacer]
-- Dia 4-7: [primera revision, que mirar]
-- Semana 2: [optimizaciones]
-- Semana 3-4: [escalar o pivotar]
-- Mes 2+: [consolidar]
-- Reglas automaticas recomendadas en Meta Ads Manager
-- Senales de alarma: cuando pausar un anuncio
-- Senales positivas: cuando escalar presupuesto
-
-11. CUMPLIMIENTO Y POLITICAS META
-- Restricciones especificas para ${nR}
-- Palabras/claims que Meta rechaza en este sector
-- Como pasar revision de anuncios a la primera
-- Audiencias restringidas (salud, edad, etc.)
-- Disclaimer obligatorio si aplica`,sO,sL,nR,geo,setPhase,
+Genera estas secciones:
+1. DIAGNOSTICO PRE-CAMPANA: objetivo vs presupuesto realista, politicas Meta aplicables, requisitos pixel/CAPI/legales
+2. ARQUITECTURA CAMPANAS: estructura exacta para Ads Manager con campana prospeccion (intereses + lookalike) y retargeting (web + engagement), segmentacion detallada (edad, genero, radio km, 8-12 intereses), ubicaciones, presupuesto diario por conjunto
+3. DISTRIBUCION PRESUPUESTO: desglose ${budget} por campana/dia/semana, fase aprendizaje vs optimizacion
+4. FORMATO RECOMENDADO: imagen vs video vs carrusel con justificacion y datos CPM/CTR por formato para ${nR}
+5. 6 ANUNCIOS COMPLETOS: para cada uno: copy primario (3 variantes A/B), titulo, descripcion, CTA, prompt IA imagen detallado (Midjourney, ingles, con sujeto, iluminacion, composicion, --ar, --v 6), negative prompt
+6. LANDING/TRACKING: pagina destino, eventos pixel, UTMs
+7. PROYECCION RESULTADOS: tabla con impresiones, alcance, CTR, CPC, leads, CPL, conversiones, ROAS - estimaciones conservadora/media/alta con datos reales del sector
+8. CALENDARIO OPTIMIZACION: dia 1-3, semana 1, semana 2-4, mes 2+, señales alarma y escalado
+9. CUMPLIMIENTO POLITICAS META: restricciones ${nR}, claims prohibidos, audiencias limitadas`,sO,sL,nR,geo,setPhase,
     {tool:"Meta Ads Pro",client:nm||"Sin asignar",inputs:{servicio:srv,objetivo:obj,presupuesto:budget}});
   };
 
   const genCreatives=()=>{
     setTab("creatives");
-    ai("Eres un director creativo de una agencia de performance marketing especializada en Meta Ads para negocios locales. Tu fortaleza es crear creatividades que CONVIERTEN: copies que pasan la revision de Meta, imagenes que detienen el scroll, y prompts de IA que generan fotos realistas y profesionales del sector. Cada prompt de imagen debe ser extremadamente detallado y profesional.",
-    `PACK CREATIVO COMPLETO PARA META ADS
-Centro: "${nm||"[Nombre]"}". Sector: ${nR}. Servicio: "${srv||"General"}". Localizacion: ${geo}.
-Objetivo: ${obj}. Diferenciador: ${usp||"No especificado"}. Oferta: ${offer||"Sin oferta"}.
+    ai("Director creativo de Meta Ads para negocios locales. Crea creatividades que convierten. Prompts de imagen IA detallados en ingles (Midjourney v6). Copies que pasan revision Meta.",
+    `PACK CREATIVO META ADS para: "${nm||"[Nombre]"}" (${nR}) en ${geo}. Servicio: "${srv||"General"}".
+Objetivo: ${obj}. USP: ${usp||"N/A"}. Oferta: ${offer||"Sin oferta"}.
 
-GENERA 10 CREATIVIDADES COMPLETAS LISTAS PARA PRODUCIR:
+Genera 10 creatividades COMPLETAS listas para producir. Para CADA una incluye: copy primario (3 variantes: emocional/racional/social proof, max 125 chars primera linea), titulo (40 chars), descripcion (30 chars), CTA, y prompt IA imagen detallado en ingles (sujeto, entorno ${nR}, iluminacion, composicion, emocion, --ar, --v 6 --style raw, NO texto en imagen) + negative prompt.
 
-================================================================
-CREATIVIDAD 1 - HERO IMAGE (Feed 1:1)
-================================================================
-Formato: 1080x1080px
-Ubicacion: Feed Facebook + Instagram
+Las 10 creatividades:
+1. HERO IMAGE feed 1:1 (1080x1080) - prospeccion
+2. STORIES vertical 9:16 (1080x1920) - prospeccion, con overlay texto sugerido
+3. CARRUSEL PROCESO 5 tarjetas (1080x1080) - paso a paso del servicio, prompt IA por tarjeta
+4. IMAGEN 4:5 vertical (1080x1350) - concepto transformacion sin before/after prohibido
+5. TESTIMONIO SOCIAL PROOF 1:1 - resena estilizada como creatividad
+6. VIDEO SCRIPT 15s vertical - guion segundo a segundo con texto pantalla y audio
+7. VIDEO SCRIPT 30s feed - estructura problema-agitacion-solucion-CTA, thumbnail prompt IA
+8. RETARGETING imagen 1:1 - urgencia suave, copy diferente a prospeccion
+9. OFERTA/PROMO stories - ${offer||"primera consulta gratuita"}, countdown
+10. AUTORIDAD/EQUIPO feed - posicionar profesional como referente
 
-COPY PRINCIPAL (3 variantes):
-A (emocional): [texto completo, max 125 chars primera linea visible + extension]
-B (racional): [texto completo]
-C (social proof): [texto completo]
-
-TITULO: [max 40 chars] (3 variantes)
-DESCRIPCION: [max 30 chars]
-CTA: [boton especifico de Meta]
-
-PROMPT IMAGEN IA (Midjourney v6):
-"""
-[Prompt hiper-detallado en ingles. Debe incluir:
-- Sujeto principal (persona real, no stock, etnia mediterranea si aplica)
-- Entorno especifico del sector ${nR} (recepcion clinica, consulta, etc.)
-- Iluminacion (natural suave, golden hour, clinica profesional)
-- Composicion (regla de tercios, espacio para texto overlay)
-- Estilo fotografico (editorial, lifestyle, documental)
-- Paleta de color (calida, fria, neutra)
-- Detalles de vestuario y atrezzo del sector
-- Emocion/expresion del sujeto
-- NO texto en la imagen
-- Parametros: --ar 1:1 --v 6 --style raw --s 200]
-"""
-NEGATIVE PROMPT: [que evitar especificamente]
-ALTERNATIVA DALL-E 3: [prompt adaptado para DALL-E]
-
-OVERLAY DE TEXTO (si aplica):
-- Posicion: [superior/inferior/centro]
-- Texto: [max 20% de la imagen segun politica Meta]
-- Tipografia sugerida: [nombre + peso]
-- Color texto: [hex]
-
-================================================================
-CREATIVIDAD 2 - STORIES/REELS VERTICAL (9:16)
-================================================================
-Formato: 1080x1920px
-Ubicacion: Stories + Reels Instagram y Facebook
-
-[Misma estructura: copy x3, titulo, CTA, prompt IA vertical con --ar 9:16, overlay]
-
-================================================================
-CREATIVIDAD 3 - CARRUSEL PROCESO (Feed)
-================================================================
-Formato: 1080x1080px x 5 tarjetas
-Concepto: Mostrar el proceso paso a paso de "${srv}" para reducir incertidumbre
-
-TARJETA 1 (Gancho):
-- Texto overlay: [frase gancho]
-- Prompt IA: [descripcion de imagen que genere curiosidad]
-
-TARJETA 2 (Paso 1 - Consulta):
-- Texto overlay: [paso]
-- Prompt IA: [imagen especifica]
-
-TARJETA 3 (Paso 2 - Procedimiento):
-- Texto overlay: [paso]
-- Prompt IA: [imagen especifica]
-
-TARJETA 4 (Paso 3 - Resultado):
-- Texto overlay: [paso]
-- Prompt IA: [imagen especifica, expresion satisfecha]
-
-TARJETA 5 (CTA):
-- Texto overlay: [CTA + oferta si hay]
-- Prompt IA: [imagen del centro/equipo, transmitir confianza]
-
-COPY del anuncio: [texto completo]
-
-================================================================
-CREATIVIDAD 4 - ANTES/CONCEPTO (Feed 4:5)
-================================================================
-Formato: 1080x1350px (4:5 vertical, maximo espacio en feed)
-Concepto: Mostrar transformacion sin before/after prohibido (usar concepto/aspiracion)
-
-[Copy x3, prompt IA que esquive restricciones de Meta para salud, overlay]
-
-================================================================
-CREATIVIDAD 5 - TESTIMONIO SOCIAL PROOF (Feed 1:1)
-================================================================
-Formato: 1080x1080px
-Concepto: Resena real estilizada como creatividad
-
-[Copy con testimonio (marcador para real), prompt IA persona satisfecha en entorno local ${geo}, overlay con cita]
-
-================================================================
-CREATIVIDAD 6 - VIDEO SCRIPT 15s (Stories/Reels)
-================================================================
-Formato: 1080x1920 vertical, 15 segundos
-
-SEGUNDO 0-3 (GANCHO):
-- Visual: [que se ve]
-- Audio/voz: [que se dice/escucha]
-- Texto pantalla: [overlay]
-
-SEGUNDO 3-8 (PROBLEMA/SOLUCION):
-- Visual: [transicion + escena]
-- Audio/voz: [texto]
-- Texto pantalla: [overlay]
-
-SEGUNDO 8-13 (PRUEBA/RESULTADO):
-- Visual: [escena]
-- Audio/voz: [texto]
-- Texto pantalla: [overlay]
-
-SEGUNDO 13-15 (CTA):
-- Visual: [escena final]
-- Audio/voz: [CTA hablado]
-- Texto pantalla: [CTA + info contacto]
-
-THUMBNAIL: Prompt IA para miniatura
-MUSICA: [sugerir tipo/mood, no track especifico]
-COPY del anuncio: [texto]
-
-================================================================
-CREATIVIDAD 7 - VIDEO SCRIPT 30s (Feed)
-================================================================
-Formato: 1080x1080 o 1080x1350, 30 segundos
-[Guion segundo a segundo mas detallado, estructura problema-agitacion-solucion-CTA]
-
-================================================================
-CREATIVIDAD 8 - RETARGETING (Feed 1:1)
-================================================================
-Concepto: Para personas que ya visitaron la web o interactuaron
-[Copy con urgencia suave, prompt IA mas cercano/personal, CTA directo]
-
-================================================================
-CREATIVIDAD 9 - OFERTA/PROMO (Stories)
-================================================================
-Concepto: ${offer||"Primera consulta gratuita / valoracion sin compromiso"}
-[Prompt IA con elementos graficos (no texto en foto), overlay con oferta clara, copy con deadline]
-
-================================================================
-CREATIVIDAD 10 - AUTORIDAD/EQUIPO (Feed)
-================================================================
-Concepto: Posicionar al profesional como referente
-[Prompt IA del profesional en entorno de trabajo, transmitir experiencia y cercania, copy con credenciales]
-
-================================================================
-RESUMEN DE PRODUCCION
-================================================================
-- Total piezas graficas necesarias: [contar]
-- Total prompts IA listos: [contar]
-- Total videos a producir: [contar]
-- Estimacion tiempo produccion: [horas]
-- Orden de prioridad para lanzar: [cual primero]
-- Testing plan: que creatividades enfrentar en A/B test
-- Rotacion creativa: cuando cambiar creatividades (fatiga)`,sO,sL,nR,geo,
+Al final: RESUMEN PRODUCCION con total piezas, orden prioridad lanzamiento, plan A/B testing, rotacion creativa anti-fatiga.`,sO,sL,nR,geo,
     {tool:"Meta Ads Pro - Creatividades",client:nm||"Sin asignar",inputs:{servicio:srv,objetivo:obj}});
   };
-
   return <div>
     <div style={{marginBottom:20}}>
       <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Meta Ads Pro</h3>
@@ -2292,64 +1795,21 @@ function PredictiveDashboard(){
           </div>
           <Btn primary disabled={!nm||!ni||!ci} color={C.green} onClick={()=>{
             setTab("projections");
-            aiSearch("Eres un analista de datos de marketing digital para negocios locales. Generas PROYECCIONES REALISTAS basadas en benchmarks del sector en Espana. Busca datos reales del sector para fundamentar las estimaciones. NUNCA infles numeros. Usa rangos conservadores. Si no hay datos suficientes, usa marcadores [COMPLETAR CON DATO REAL]. Responde en espanol de Espana.",
-            `DASHBOARD PREDICTIVO para: "${nm}" en ${ci}. Sector: ${nR}. Meses con marketing digital: ${mesesActivo}.
+            aiSearch("Analista de marketing digital. Proyecciones REALISTAS con benchmarks sector Espana. Rangos conservadores. Busca datos reales.",
+            `DASHBOARD PREDICTIVO: "${nm}" en ${ci}. Sector: ${nR}. Meses activo: ${mesesActivo}.
+Metricas: ${[visitas&&"visitas:"+visitas,leads&&"leads:"+leads,conv&&"conv:"+conv,ticket&&"ticket:"+ticket+"EUR",resenas&&"resenas:"+resenas+"("+nota+")",seguidores&&"seguidores:"+seguidores,gbpViews&&"GBP:"+gbpViews,kwPos&&"SEO:"+kwPos,inversionAds&&"ads:"+inversionAds+"EUR"].filter(Boolean).join(", ")||"Sin metricas"}.
 
-METRICAS ACTUALES PROPORCIONADAS:
-- Visitas web/mes: ${visitas||"No proporcionado"}
-- Leads/consultas mes: ${leads||"No proporcionado"}
-- Conversiones/mes: ${conv||"No proporcionado"}
-- Ticket medio: ${ticket?ticket+" EUR":"No proporcionado"}
-- Resenas Google: ${resenas||"No proporcionado"} (nota: ${nota||"?"})
-- Seguidores RRSS: ${seguidores||"No proporcionado"}
-- Vistas GBP/mes: ${gbpViews||"No proporcionado"}
-- Posiciones SEO: ${kwPos||"No proporcionado"}
-- Inversion ads: ${inversionAds?inversionAds+" EUR/mes":"Sin inversion"}
+Busca benchmarks ${nR} Espana: conversion, ticket medio, crecimiento organico.
 
-BUSCA: benchmarks del sector ${nR} en Espana, tasas de conversion tipicas, ticket medio del sector, crecimiento organico esperado.
-
-GENERA:
-
-1. ANALISIS ESTADO ACTUAL
-- Evaluacion de cada metrica vs benchmark del sector
-- Puntuacion global /100
-- Fortalezas y debilidades principales
-- Comparativa con competencia tipica en ${ci}
-
-2. PROYECCION A 3 MESES (Escenario conservador)
-Tabla con: Metrica | Actual | Proyeccion 3m | Variacion %
-Para cada metrica proporcionada, proyectar crecimiento realista.
-Calcular: ingresos adicionales estimados = nuevas conversiones x ticket medio
-
-3. PROYECCION A 6 MESES
-Misma tabla. Incluir efecto acumulativo del SEO (el SEO tarda 3-6 meses en dar resultados completos).
-Calcular: ROI acumulado
-
-4. PROYECCION A 12 MESES
-Misma tabla. Incluir madurez de canales.
-Calcular: ROI anual y facturacion adicional estimada
-
-5. ALERTAS Y RIESGOS
-- Señales de alarma a vigilar
-- Cuellos de botella probables
-- Dependencias criticas
-- Plan B si los resultados no llegan
-
-6. QUICK WINS (Impacto inmediato)
-- 5 acciones que pueden dar resultados en menos de 30 dias
-- Cada una con: accion concreta, impacto estimado, esfuerzo requerido
-
-7. RECOMENDACIONES ESTRATEGICAS
-- Donde invertir mas recursos y por que
-- Canales a priorizar segun datos
-- Contenido que mejor funciona en ${nR}
-- Momentos clave del año para ${nR} (estacionalidad)
-
-8. SCORECARD MENSUAL
-- Plantilla de KPIs a seguir cada mes
-- Valores objetivo para cada metrica
-- Sistema de semaforo (verde/amarillo/rojo)
-- Frecuencia de revision recomendada`,sO,sL,nR,ci||"Espana",setPhase,
+Secciones:
+1. ESTADO ACTUAL: cada metrica vs benchmark, puntuacion /100, fortalezas/debilidades
+2. PROYECCION 3 MESES: tabla Metrica|Actual|Proyeccion|Variacion%, ingresos adicionales estimados
+3. PROYECCION 6 MESES: misma tabla, efecto acumulativo SEO, ROI acumulado
+4. PROYECCION 12 MESES: misma tabla, madurez canales, ROI anual
+5. ALERTAS: senales alarma, cuellos botella, plan B
+6. QUICK WINS: 5 acciones impacto <30 dias (accion, impacto estimado, esfuerzo)
+7. RECOMENDACIONES: donde invertir, canales prioritarios, estacionalidad ${nR}
+8. SCORECARD: KPIs mensuales, valores objetivo, semaforo verde/amarillo/rojo`,sO,sL,nR,ci||"Espana",setPhase,
             {tool:"Dashboard Predictivo",client:nm,inputs:{visitas:visitas,leads:leads,conv:conv}});
           }}>Generar Proyección con IA</Btn>
         </div>
