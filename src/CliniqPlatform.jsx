@@ -1896,36 +1896,135 @@ Secciones:
 
 /* ══════ HOME ══════ */
 function Home({go}){
+  const[cls,setCls]=useState([]);
+  const[,tick]=useState(0);
+  useEffect(()=>{
+    db.getClients().then(data=>{
+      if(data&&data.length>0) setCls(data.map(r=>({
+        nombre:r.nombre||"",plan:r.plan||"Esencial",nicho:r.nicho||"",
+        cuotaMensual:r.cuota_mensual||r.cuotaMensual||"",fechaAlta:r.fecha_alta||""
+      })));
+    }).catch(()=>{});
+    const t=setInterval(()=>tick(n=>n+1),5000);
+    return ()=>clearInterval(t);
+  },[]);
+
+  const log=ACTIVITY_LOG;
+  const now=new Date();
+  const thisMonth=log.filter(e=>{const d=new Date(e.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
+  const today=log.filter(e=>new Date(e.date).toDateString()===now.toDateString());
+  const toolsUsed=[...new Set(thisMonth.map(e=>e.tool))];
+  const mrr=cls.reduce((s,c)=>s+(parseFloat(c.cuotaMensual)||0),0);
+  const planDist={Esencial:0,Profesional:0,Premium:0};
+  cls.forEach(c=>{if(planDist[c.plan]!==undefined)planDist[c.plan]++;});
+  const nicheDist={};
+  cls.forEach(c=>{const n=c.nicho||"Sin sector";nicheDist[n]=(nicheDist[n]||0)+1;});
+  const topNiches=Object.entries(nicheDist).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const last5=log.slice(-5).reverse();
+
+  const Kpi=({label,value,sub,color})=><div style={{background:C.sf,border:"1px solid "+C.bd,borderRadius:12,padding:"16px 20px",borderTop:"3px solid "+color}}>
+    <div style={{fontSize:11,color:C.tx,marginBottom:4}}>{label}</div>
+    <div style={{fontSize:26,fontWeight:700,color:color}}>{value}</div>
+    {sub&&<div style={{fontSize:11,color:C.txD,marginTop:2}}>{sub}</div>}
+  </div>;
+
+  const Bar=({label,value,max,color})=>{
+    const pct=max>0?Math.round(value/max*100):0;
+    return <div style={{marginBottom:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+        <span style={{color:C.tx}}>{label}</span><span style={{color:color,fontWeight:600}}>{value}</span>
+      </div>
+      <div style={{height:6,background:C.sf2,borderRadius:3,overflow:"hidden"}}>
+        <div style={{height:"100%",width:pct+"%",background:color,borderRadius:3,transition:"width 0.5s"}}/>
+      </div>
+    </div>;
+  };
+
   return <div>
-    <div style={{marginBottom:28}}>
-      <h2 style={{fontSize:22,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Panel de Control</h2>
-      <p style={{fontSize:14,color:C.tx,margin:0}}>Cliniq Digital - 28 herramientas | Web Search IA | Registro Actividad</p>
+    <div style={{marginBottom:24}}>
+      <h2 style={{fontSize:22,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Dashboard</h2>
+      <p style={{fontSize:13,color:C.tx,margin:0}}>Cliniq Digital - {now.toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:14,marginBottom:24}}>
-      {[{lb:"Nichos",v:"10+",cl:C.purple},{lb:"Herramientas",v:"28",cl:C.blue},{lb:"Motor IA",v:"Claude",cl:C.teal},{lb:"Plataformas",v:"18+",cl:C.green}].map(s=>
-        <div key={s.lb} style={{background:C.sf,border:"1px solid "+C.bd,borderRadius:12,padding:"16px 20px"}}>
-          <div style={{fontSize:11,color:C.tx,marginBottom:6}}>{s.lb}</div>
-          <div style={{fontSize:24,fontWeight:700,color:s.cl}}>{s.v}</div>
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:14,marginBottom:24}}>
+      <Kpi label="Clientes activos" value={cls.length} sub={cls.length>0?`${planDist.Premium} premium`:""} color={C.teal}/>
+      <Kpi label="MRR (mensual)" value={mrr>0?mrr.toLocaleString("es-ES")+" EUR":"0 EUR"} sub={cls.length>0?Math.round(mrr/cls.length)+" EUR/cliente medio":""} color={C.green}/>
+      <Kpi label="Consultas mes" value={thisMonth.length} sub={today.length+" hoy"} color={C.blue}/>
+      <Kpi label="Herramientas usadas" value={toolsUsed.length} sub="de 28 disponibles" color={C.purple}/>
+      <Kpi label="Total consultas" value={log.length} sub={cls.length>0?Math.round(log.length/cls.length)+" por cliente":""} color={C.cyan}/>
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:24}}>
+
+      <Crd>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:0}}>Actividad reciente</h3>
+          <span onClick={()=>go("clients")} style={{fontSize:11,color:C.teal,cursor:"pointer"}}>Ver todo</span>
         </div>
-      )}
+        {last5.length===0?<p style={{fontSize:13,color:C.txD}}>Sin actividad. Usa cualquier herramienta para empezar.</p>
+        :last5.map((e,i)=>{
+          const d=new Date(e.date);
+          const mins=Math.round((now-d)/60000);
+          const timeAgo=mins<60?mins+"min":mins<1440?Math.round(mins/60)+"h":Math.round(mins/1440)+"d";
+          return <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<last5.length-1?"1px solid "+C.bd:"none"}}>
+            <span style={{fontSize:10,fontWeight:700,color:C.bg,background:C.cyan,padding:"2px 6px",borderRadius:4,whiteSpace:"nowrap",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{e.tool}</span>
+            <span style={{fontSize:12,color:C.tx,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.client}</span>
+            <span style={{fontSize:10,color:C.txD,whiteSpace:"nowrap"}}>{timeAgo}</span>
+          </div>;
+        })}
+      </Crd>
+
+      <Crd>
+        <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Clientes por plan</h3>
+        {cls.length===0?<p style={{fontSize:13,color:C.txD}}>Sin clientes registrados.</p>:<div>
+          <Bar label="Esencial (297 EUR)" value={planDist.Esencial} max={cls.length} color={C.teal}/>
+          <Bar label="Profesional (497 EUR)" value={planDist.Profesional} max={cls.length} color={C.blue}/>
+          <Bar label="Premium (897 EUR)" value={planDist.Premium} max={cls.length} color={C.gold}/>
+          <div style={{marginTop:14,padding:"10px 12px",background:C.sf2,borderRadius:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+              <span style={{color:C.tx}}>Facturacion anual estimada</span>
+              <span style={{color:C.green,fontWeight:700}}>{(mrr*12).toLocaleString("es-ES")} EUR</span>
+            </div>
+          </div>
+        </div>}
+      </Crd>
+
+      {topNiches.length>0&&<Crd>
+        <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Sectores</h3>
+        {topNiches.map(([n,c],i)=><Bar key={n} label={n} value={c} max={cls.length} color={[C.purple,C.blue,C.teal,C.rose,C.orange][i%5]}/>)}
+      </Crd>}
+
+      {toolsUsed.length>0&&<Crd>
+        <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Herramientas mas usadas (mes)</h3>
+        {(()=>{
+          const freq={};thisMonth.forEach(e=>{freq[e.tool]=(freq[e.tool]||0)+1;});
+          const sorted=Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,6);
+          const maxV=sorted[0]?.[1]||1;
+          return sorted.map(([t,c],i)=><Bar key={t} label={t} value={c} max={maxV} color={[C.cyan,C.blue,C.teal,C.purple,C.gold,C.rose][i%6]}/>);
+        })()}
+      </Crd>}
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:16}}>
-      {[
-        {t:"Producción",ids:["landing","whatsapp","seo","followup","social","video","imageprompt","gbp","webstruct"]},
-        {t:"Crecimiento",ids:["multiplier","proposal","campaign","metaads","dashboard"]},
-        {t:"Inteligencia",ids:["audit","competitor","compliance","reviews"]},
-        {t:"Presencia Digital",ids:["scan","deepanalysis","expansion","citations","reputation","voiceseo","brandmonitor","implement"]},
-        {t:"Estrategia y Gestión",ids:["report","manual","clients"]}
-      ].map(g=><Crd key={g.t}>
-        <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>{g.t}</h3>
-        {g.ids.map(id=>{const it=ITEMS.find(x=>x.id===id);if(!it)return null;return(
-          <div key={id} onClick={()=>go(id)} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:8,cursor:"pointer",transition:"background 0.15s"}}
-            onMouseEnter={e=>{e.currentTarget.style.background=C.sf2;}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-            <span style={{fontSize:13,color:it.cl,width:20,textAlign:"center"}}>{it.ic}</span>
-            <span style={{fontSize:13,color:C.tx,flex:1}}>{it.lb}</span>
-            <span style={{fontSize:11,color:C.txD}}>{">"}</span>
-          </div>);})}
-      </Crd>)}
+
+    <div style={{marginBottom:16}}>
+      <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Acceso rapido</h3>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:16}}>
+        {[
+          {t:"Produccion",ids:["landing","whatsapp","seo","followup","social","video","imageprompt","gbp","webstruct"]},
+          {t:"Crecimiento",ids:["multiplier","proposal","campaign","metaads","dashboard"]},
+          {t:"Inteligencia",ids:["audit","competitor","compliance","reviews"]},
+          {t:"Presencia Digital",ids:["scan","deepanalysis","expansion","citations","reputation","voiceseo","brandmonitor","implement"]},
+          {t:"Gestion",ids:["report","manual","clients"]}
+        ].map(g=><Crd key={g.t}>
+          <h3 style={{fontSize:13,fontWeight:700,color:C.w,margin:"0 0 10px"}}>{g.t}</h3>
+          {g.ids.map(id=>{const it=ITEMS.find(x=>x.id===id);if(!it)return null;return(
+            <div key={id} onClick={()=>go(id)} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderRadius:8,cursor:"pointer",transition:"background 0.15s"}}
+              onMouseEnter={e=>{e.currentTarget.style.background=C.sf2;}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
+              <span style={{fontSize:12,color:it.cl,width:18,textAlign:"center"}}>{it.ic}</span>
+              <span style={{fontSize:12,color:C.tx,flex:1}}>{it.lb}</span>
+              <span style={{fontSize:10,color:C.txD}}>{">"}</span>
+            </div>);})}
+        </Crd>)}
+      </div>
     </div>
   </div>;
 }
