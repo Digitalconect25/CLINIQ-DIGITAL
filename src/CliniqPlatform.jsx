@@ -13,7 +13,32 @@ const font="'DM Sans',sans-serif";
 /* ── GLOBAL ACTIVITY LOG ── */
 let ACTIVITY_LOG = [];
 let _activityLoaded = false;
-function logActivity(toolName, clientName, inputs, outputPreview){
+const COST_RATES={
+  groq:{input:0.20/1e6,output:0.60/1e6},
+  deepseek:{input:0.14/1e6,output:0.28/1e6},
+  "anthropic-haiku":{input:0.80/1e6,output:4.00/1e6},
+  "anthropic-sonnet4.5":{input:3.00/1e6,output:15.00/1e6},
+  "anthropic-sonnet4":{input:3.00/1e6,output:15.00/1e6},
+  "fal":{input:0,output:0,perCall:0.002}
+};
+function estimateCost(provider,model,inputText,outputText){
+  if(provider==="fal") return 0.002;
+  const inTok=Math.ceil((inputText||"").length/4);
+  const outTok=Math.ceil((outputText||"").length/4);
+  let key=provider||"anthropic";
+  if(key==="anthropic"){
+    if(model?.includes("haiku")) key="anthropic-haiku";
+    else if(model?.includes("sonnet-4-5")||model?.includes("sonnet-4.5")) key="anthropic-sonnet4.5";
+    else key="anthropic-sonnet4";
+  }
+  const rate=COST_RATES[key]||COST_RATES["anthropic-sonnet4"];
+  return Math.round((inTok*rate.input+outTok*rate.output)*100000)/100000;
+}
+function logActivity(toolName, clientName, inputs, outputPreview, providerInfo){
+  const prov=providerInfo?.provider||"anthropic";
+  const mod=providerInfo?.model||"";
+  const inText=providerInfo?.inputText||"";
+  const cost=estimateCost(prov,mod,inText,outputPreview);
   const entry = {
     id:Date.now()+Math.random(),
     date:new Date().toISOString(),
@@ -21,10 +46,11 @@ function logActivity(toolName, clientName, inputs, outputPreview){
     client:clientName||"Sin asignar",
     inputs:inputs||{},
     preview:(outputPreview||"").slice(0,300),
-    fullOutput:outputPreview||""
+    fullOutput:outputPreview||"",
+    provider:prov,model:mod,estCost:cost
   };
   ACTIVITY_LOG.push(entry);
-  db.logActivity({tool:entry.tool,client:entry.client,inputs:entry.inputs,preview:entry.preview,fullOutput:entry.fullOutput}).catch(()=>{});
+  db.logActivity({tool:entry.tool,client:entry.client,inputs:entry.inputs,preview:entry.preview,fullOutput:entry.fullOutput,provider:entry.provider,model:entry.model,estCost:entry.estCost}).catch(()=>{});
 }
 async function loadActivityFromDb(){
   if(_activityLoaded) return;
@@ -35,7 +61,8 @@ async function loadActivityFromDb(){
         id:r.id,date:r.created_at||r.date||new Date().toISOString(),
         tool:r.tool||"IA",client:r.client_name||r.client||"Sin asignar",
         inputs:typeof r.inputs==="string"?JSON.parse(r.inputs):(r.inputs||{}),
-        preview:r.preview||"",fullOutput:r.full_output||r.fullOutput||""
+        preview:r.preview||"",fullOutput:r.full_output||r.fullOutput||"",
+        provider:r.provider||"anthropic",model:r.model||"",estCost:parseFloat(r.est_cost)||0
       }));
       _activityLoaded=true;
     }
@@ -150,6 +177,7 @@ const MENU = [
   {id:"manual",ic:"◳",lb:"Manual Comunicación",cl:C.gold},
   {g:"GESTIÓN"},
   {id:"clients",ic:"◈",lb:"Clientes / Facturación",cl:C.teal},
+  {id:"tasks",ic:"☑",lb:"Tareas / Pendientes",cl:C.orange},
 ];
 const ITEMS=MENU.filter(m=>m.id);
 
@@ -467,7 +495,7 @@ async function ai(sysExtra,prompt,setO,setL,niche,geo,logInfo){
   const full=await streamRequest({model,provider,max_tokens:4096,stream:true,system:sys,messages:[{role:"user",content:prompt}]},setO,setL);
   if(full&&!full.startsWith("Error")&&!full.startsWith("ERROR")){
     const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);
-    logActivity(toolName,logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full);
+    logActivity(toolName,logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full,{provider,model,inputText:prompt});
   }
   if(!full&&!setO.lastVal) setO("Sin contenido en la respuesta.");
   setL(false);
@@ -574,7 +602,7 @@ async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
     if(retryNeeded) continue;
     if(sources.length>0){full+="\n\n---\nFUENTES CONSULTADAS:\n";sources.forEach(s=>{full+=`- ${s.title}: ${s.url}\n`;});setO(full);}
     if(!full) setO("Sin resultados. Verifica los datos e intenta de nuevo.");
-    if(full){const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);logActivity(toolName+" (Web)",logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full);}
+    if(full){const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);logActivity(toolName+" (Web)",logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full,{provider:"anthropic",model:"claude-sonnet-4-20250514",inputText:prompt});}
     if(setPhase) setPhase("done");setL(false);return;
   }catch(e){
     if(attempt<maxRetries-1){setO("Error de conexion, reintentando en 5s...");await new Promise(ok=>setTimeout(ok,5000));continue;}
@@ -1225,7 +1253,7 @@ function ImagePrompt(){
       if(data.images&&data.images.length>0){
         setImgResult(data.images[0]);
         setImgHistory(prev=>[{url:data.images[0].url,prompt:imgPrompt,model:imgModel,date:new Date().toISOString()},...prev].slice(0,12));
-        logActivity("Generador Imagen IA",nm||"Sin asignar",{prompt:imgPrompt.slice(0,100),modelo:imgModel},"Imagen generada: "+data.images[0].url);
+        logActivity("Generador Imagen IA",nm||"Sin asignar",{prompt:imgPrompt.slice(0,100),modelo:imgModel},"Imagen generada: "+data.images[0].url,{provider:"fal",model:imgModel});
       }
     }catch(e){setImgError("Error de conexion: "+e.message);}
     setImgLoading(false);
@@ -1433,6 +1461,8 @@ function Clients(){
   const[editId,setEditId]=useState(null);
   const[editLog,setEditLog]=useState(null);
   const[,forceUpdate]=useState(0);
+  const[logSearch,setLogSearch]=useState("");
+  const[logToolFilter,setLogToolFilter]=useState("all");
 
   useEffect(()=>{
     db.getClients().then(data=>{
@@ -1531,7 +1561,7 @@ function Clients(){
       <Btn primary onClick={()=>{setShow(!show);setSel(null);setEditId(null);setF({...emptyClient});}}>+ Nuevo Cliente</Btn>
     </div>
 
-    <Tab tabs={[{id:"list",lb:"Clientes"},{id:"log",lb:"Registro ("+allLog.length+")"},{id:"logclient",lb:"Log por Cliente"}]} active={tab} onChange={setTab}/>
+    <Tab tabs={[{id:"list",lb:"Clientes"},{id:"log",lb:"Biblioteca ("+allLog.length+")"},{id:"logclient",lb:"Log por Cliente"}]} active={tab} onChange={setTab}/>
 
     {tab==="list"&&show&&<ClientForm/>}
 
@@ -1586,20 +1616,41 @@ function Clients(){
     </Crd>}
 
     {tab==="log"&&<div>
+      <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+        <Inp value={logSearch} onChange={setLogSearch} ph="Buscar en contenido..." style={{flex:1,minWidth:200}}/>
+        <Sel value={logToolFilter} onChange={setLogToolFilter}
+          opts={[{v:"all",l:"Todas las herramientas"},...[...new Set(allLog.map(e=>e.tool))].sort().map(t=>({v:t,l:t}))]}
+          style={{maxWidth:220}}/>
+      </div>
       <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
         <Btn small primary color={C.cyan} onClick={()=>exportLogPDF(allLog,"Todos")}>Exportar PDF</Btn>
         {allLog.length>0&&<Btn small color={C.red} onClick={clearAllLogs}>Borrar todo</Btn>}
+        <span style={{fontSize:11,color:C.txD,marginLeft:"auto"}}>
+          {(()=>{const f=allLog.filter(e=>{
+            if(logToolFilter!=="all"&&e.tool!==logToolFilter) return false;
+            if(logSearch&&!(e.fullOutput||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.tool||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.client||"").toLowerCase().includes(logSearch.toLowerCase())) return false;
+            return true;
+          });return f.length+" de "+allLog.length+" contenidos";})()}
+        </span>
       </div>
-      {allLog.length===0?<Crd sx={{textAlign:"center",padding:30}}><p style={{color:C.txD}}>Sin consultas registradas.</p></Crd>
-      :allLog.slice().reverse().map((e,idx)=>{
-        const realIdx=allLog.length-1-idx;
+      {allLog.length===0?<Crd sx={{textAlign:"center",padding:30}}><p style={{color:C.txD}}>Sin contenido generado. Usa cualquier herramienta para empezar tu biblioteca.</p></Crd>
+      :allLog.slice().reverse().filter(e=>{
+        if(logToolFilter!=="all"&&e.tool!==logToolFilter) return false;
+        if(logSearch&&!(e.fullOutput||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.tool||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.client||"").toLowerCase().includes(logSearch.toLowerCase())) return false;
+        return true;
+      }).map((e,idx)=>{
+        const realIdx=allLog.indexOf(e);
         const d=new Date(e.date);
         const isEditing=editLog===realIdx;
-        return <Crd key={idx} sx={{padding:12,marginBottom:6}}>
+        const provLabel=e.provider==="groq"?"Groq":e.provider==="deepseek"?"DeepSeek":e.provider==="fal"?"Fal.ai":"Claude";
+        const provColor=e.provider==="groq"?C.green:e.provider==="deepseek"?C.blue:e.provider==="fal"?C.orange:C.purple;
+        return <Crd key={e.id||idx} sx={{padding:12,marginBottom:6}}>
           <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6,marginBottom:6}}>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
               <span style={{fontSize:11,fontWeight:700,color:C.bg,background:C.cyan,padding:"2px 8px",borderRadius:4}}>{e.tool}</span>
               <span style={{fontSize:12,color:C.w}}>{e.client}</span>
+              <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:provColor+"25",color:provColor}}>{provLabel}</span>
+              {e.estCost>0&&<span style={{fontSize:9,color:C.txD}}>${(e.estCost||0).toFixed(4)}</span>}
             </div>
             <span style={{fontSize:11,color:C.txD}}>{d.toLocaleDateString("es-ES")} {d.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})}</span>
           </div>
@@ -1612,7 +1663,7 @@ function Clients(){
             <div style={{fontSize:12,color:C.tx,lineHeight:1.5,maxHeight:60,overflow:"hidden"}}>{e.preview}</div>
             <div style={{display:"flex",gap:6,marginTop:6}}>
               <Btn small onClick={()=>navigator.clipboard.writeText(e.fullOutput)}>Copiar</Btn>
-              <Btn small onClick={()=>setEditLog(realIdx)}>Editar</Btn>
+              <Btn small onClick={()=>setEditLog(realIdx)}>Ver / Editar</Btn>
               <Btn small color={C.red} onClick={()=>deleteLog(realIdx)}>Borrar</Btn>
             </div>
           </div>}
@@ -2049,9 +2100,154 @@ Secciones:
   </div>;
 }
 
+/* ══════ TASKS ══════ */
+function Tasks(){
+  const[tasks,setTasks]=useState([]);
+  const[cls,setCls]=useState([]);
+  const[show,setShow]=useState(false);
+  const[filter,setFilter]=useState("pendiente");
+  const[clientFilter,setClientFilter]=useState("all");
+  const[editId,setEditId]=useState(null);
+  const[f,setF]=useState({title:"",description:"",client:"General",priority:"media",due_date:""});
+
+  useEffect(()=>{
+    db.getTasks().then(d=>d&&setTasks(d)).catch(()=>{});
+    db.getClients().then(d=>d&&d.length>0&&setCls(d.map(r=>r.nombre||""))).catch(()=>{});
+  },[]);
+
+  const save=()=>{
+    if(!f.title.trim()) return;
+    if(editId){
+      db.updateTask(editId,f).then(saved=>{
+        if(saved) setTasks(prev=>prev.map(t=>t.id===editId?{...saved}:t));
+      });
+      setEditId(null);
+    }else{
+      db.createTask(f).then(saved=>{
+        if(saved) setTasks(prev=>[saved,...prev]);
+      });
+    }
+    setF({title:"",description:"",client:"General",priority:"media",due_date:""});
+    setShow(false);
+  };
+
+  const toggle=(task)=>{
+    const newStatus=task.status==="completada"?"pendiente":"completada";
+    db.updateTask(task.id,{status:newStatus}).then(saved=>{
+      if(saved) setTasks(prev=>prev.map(t=>t.id===task.id?{...saved}:t));
+    });
+  };
+
+  const setProg=(task)=>{
+    db.updateTask(task.id,{status:"en_progreso"}).then(saved=>{
+      if(saved) setTasks(prev=>prev.map(t=>t.id===task.id?{...saved}:t));
+    });
+  };
+
+  const del=(id)=>{
+    if(!confirm("Eliminar tarea?")) return;
+    db.deleteTask(id);
+    setTasks(prev=>prev.filter(t=>t.id!==id));
+  };
+
+  const startEdit=(t)=>{
+    setF({title:t.title,description:t.description||"",client:t.client_name||"General",priority:t.priority||"media",due_date:t.due_date?t.due_date.split("T")[0]:""});
+    setEditId(t.id);setShow(true);
+  };
+
+  const filtered=tasks.filter(t=>{
+    if(filter!=="all"&&t.status!==filter) return false;
+    if(clientFilter!=="all"&&t.client_name!==clientFilter) return false;
+    return true;
+  });
+
+  const priColors={alta:C.rose,media:C.gold,baja:C.green};
+  const statusColors={pendiente:C.orange,en_progreso:C.blue,completada:C.green};
+  const statusLabels={pendiente:"Pendiente",en_progreso:"En progreso",completada:"Completada"};
+
+  const pendCount=tasks.filter(t=>t.status==="pendiente").length;
+  const progCount=tasks.filter(t=>t.status==="en_progreso").length;
+  const doneCount=tasks.filter(t=>t.status==="completada").length;
+  const overdueCount=tasks.filter(t=>t.status!=="completada"&&t.due_date&&new Date(t.due_date)<new Date()).length;
+
+  return <div>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+      <div>
+        <h2 style={{fontSize:20,fontWeight:700,color:C.w,margin:0}}>Tareas / Pendientes</h2>
+        <p style={{fontSize:12,color:C.txD,margin:"4px 0 0"}}>
+          {pendCount} pendientes, {progCount} en progreso, {doneCount} completadas
+          {overdueCount>0&&<span style={{color:C.rose}}> - {overdueCount} vencidas</span>}
+        </p>
+      </div>
+      <Btn onClick={()=>{setF({title:"",description:"",client:"General",priority:"media",due_date:""});setEditId(null);setShow(true);}}>+ Nueva tarea</Btn>
+    </div>
+
+    <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+      {[["all","Todas"],["pendiente","Pendientes"],["en_progreso","En progreso"],["completada","Completadas"]].map(([v,l])=>
+        <span key={v} onClick={()=>setFilter(v)} style={{padding:"5px 14px",borderRadius:8,fontSize:12,cursor:"pointer",
+          background:filter===v?C.teal:"transparent",color:filter===v?C.bg:C.tx,border:"1px solid "+(filter===v?C.teal:C.bd)}}>{l}</span>
+      )}
+      <Sel value={clientFilter} onChange={setClientFilter}
+        opts={[{v:"all",l:"Todos los clientes"},...cls.map(n=>({v:n,l:n})),{v:"General",l:"General"}]}
+        style={{marginLeft:"auto",maxWidth:200}}/>
+    </div>
+
+    {show&&<Crd style={{marginBottom:16}}>
+      <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 12px"}}>{editId?"Editar tarea":"Nueva tarea"}</h3>
+      <Fld label="Titulo"><Inp value={f.title} onChange={v=>setF({...f,title:v})} ph="Que hay que hacer?"/></Fld>
+      <Fld label="Descripcion (opcional)"><Txa value={f.description} onChange={v=>setF({...f,description:v})} rows={2} ph="Detalles extra..."/></Fld>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+        <Fld label="Cliente"><Sel value={f.client} onChange={v=>setF({...f,client:v})} opts={[{v:"General",l:"General"},...cls.map(n=>({v:n,l:n}))]}/></Fld>
+        <Fld label="Prioridad"><Sel value={f.priority} onChange={v=>setF({...f,priority:v})} opts={[{v:"alta",l:"Alta"},{v:"media",l:"Media"},{v:"baja",l:"Baja"}]}/></Fld>
+        <Fld label="Fecha limite"><Inp type="date" value={f.due_date} onChange={v=>setF({...f,due_date:v})}/></Fld>
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:10}}>
+        <Btn onClick={save}>{editId?"Guardar cambios":"Crear tarea"}</Btn>
+        <Btn onClick={()=>{setShow(false);setEditId(null);}} style={{background:C.sf2}}>Cancelar</Btn>
+      </div>
+    </Crd>}
+
+    {filtered.length===0&&<Crd><p style={{fontSize:13,color:C.txD,textAlign:"center",padding:20}}>
+      {filter==="all"?"No hay tareas. Crea la primera con el boton de arriba.":"Sin tareas con este filtro."}
+    </p></Crd>}
+
+    {filtered.map(t=>{
+      const isOverdue=t.status!=="completada"&&t.due_date&&new Date(t.due_date)<new Date();
+      const dueStr=t.due_date?new Date(t.due_date).toLocaleDateString("es-ES",{day:"numeric",month:"short"}):"";
+      return <div key={t.id} style={{background:C.sf,border:"1px solid "+(isOverdue?C.rose:C.bd),borderRadius:10,padding:"12px 16px",marginBottom:8,
+        borderLeft:"4px solid "+(statusColors[t.status]||C.bd),opacity:t.status==="completada"?0.6:1}}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
+          <div onClick={()=>toggle(t)} style={{width:22,height:22,borderRadius:6,border:"2px solid "+(t.status==="completada"?C.green:C.bd),
+            background:t.status==="completada"?C.green:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
+            flexShrink:0,marginTop:2}}>
+            {t.status==="completada"&&<span style={{color:C.bg,fontSize:14,fontWeight:700}}>✓</span>}
+          </div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              <span style={{fontSize:14,fontWeight:600,color:t.status==="completada"?C.txD:C.w,
+                textDecoration:t.status==="completada"?"line-through":"none"}}>{t.title}</span>
+              <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:priColors[t.priority]||C.gold,color:C.bg,fontWeight:600}}>{t.priority}</span>
+              {t.client_name&&t.client_name!=="General"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:C.teal+"30",color:C.teal}}>{t.client_name}</span>}
+              {dueStr&&<span style={{fontSize:10,color:isOverdue?C.rose:C.txD}}>{isOverdue?"Vencida: ":""}{dueStr}</span>}
+            </div>
+            {t.description&&<p style={{fontSize:12,color:C.txD,margin:"4px 0 0",lineHeight:1.4}}>{t.description}</p>}
+          </div>
+          <div style={{display:"flex",gap:4,flexShrink:0}}>
+            {t.status==="pendiente"&&<span onClick={()=>setProg(t)} title="Marcar en progreso" style={{cursor:"pointer",fontSize:12,padding:"4px 8px",borderRadius:6,background:C.blue+"20",color:C.blue}}>▶</span>}
+            <span onClick={()=>startEdit(t)} style={{cursor:"pointer",fontSize:12,padding:"4px 8px",borderRadius:6,background:C.sf2,color:C.tx}}>✎</span>
+            <span onClick={()=>del(t.id)} style={{cursor:"pointer",fontSize:12,padding:"4px 8px",borderRadius:6,background:C.rose+"20",color:C.rose}}>✕</span>
+          </div>
+        </div>
+      </div>;
+    })}
+  </div>;
+}
+
 /* ══════ HOME ══════ */
 function Home({go}){
   const[cls,setCls]=useState([]);
+  const[pendingTasks,setPendingTasks]=useState(0);
+  const[overdueTasks,setOverdueTasks]=useState(0);
   const[,tick]=useState(0);
   useEffect(()=>{
     db.getClients().then(data=>{
@@ -2059,6 +2255,12 @@ function Home({go}){
         nombre:r.nombre||"",plan:r.plan||"Esencial",nicho:r.nicho||"",
         cuotaMensual:r.cuota_mensual||r.cuotaMensual||"",fechaAlta:r.fecha_alta||""
       })));
+    }).catch(()=>{});
+    db.getTasks&&db.getTasks().then(d=>{
+      if(d){
+        setPendingTasks(d.filter(t=>t.status!=="completada").length);
+        setOverdueTasks(d.filter(t=>t.status!=="completada"&&t.due_date&&new Date(t.due_date)<new Date()).length);
+      }
     }).catch(()=>{});
     const t=setInterval(()=>tick(n=>n+1),5000);
     return ()=>clearInterval(t);
@@ -2107,6 +2309,7 @@ function Home({go}){
       <Kpi label="Consultas mes" value={thisMonth.length} sub={today.length+" hoy"} color={C.blue}/>
       <Kpi label="Herramientas usadas" value={toolsUsed.length} sub="de 28 disponibles" color={C.purple}/>
       <Kpi label="Total consultas" value={log.length} sub={cls.length>0?Math.round(log.length/cls.length)+" por cliente":""} color={C.cyan}/>
+      <Kpi label="Tareas pendientes" value={pendingTasks} sub={overdueTasks>0?overdueTasks+" vencidas":"todo al dia"} color={overdueTasks>0?C.rose:C.orange}/>
     </div>
 
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:24}}>
@@ -2158,6 +2361,48 @@ function Home({go}){
           return sorted.map(([t,c],i)=><Bar key={t} label={t} value={c} max={maxV} color={[C.cyan,C.blue,C.teal,C.purple,C.gold,C.rose][i%6]}/>);
         })()}
       </Crd>}
+
+      <Crd>
+        <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Costes IA (mes actual)</h3>
+        {(()=>{
+          const provCosts={};
+          thisMonth.forEach(e=>{
+            const p=e.provider||"anthropic";
+            if(!provCosts[p]) provCosts[p]={count:0,cost:0};
+            provCosts[p].count++;
+            provCosts[p].cost+=(parseFloat(e.estCost)||0);
+          });
+          const totalCost=Object.values(provCosts).reduce((s,v)=>s+v.cost,0);
+          const provColors={groq:C.green,deepseek:C.blue,anthropic:C.purple,fal:C.orange};
+          const provLabels={groq:"Groq (Llama 4)",deepseek:"DeepSeek",anthropic:"Claude",fal:"Fal.ai (imagenes)"};
+          const entries=Object.entries(provCosts).sort((a,b)=>b[1].cost-a[1].cost);
+          return <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:14}}>
+              <span style={{fontSize:22,fontWeight:700,color:totalCost>5?C.rose:C.green}}>{totalCost.toFixed(3)} USD</span>
+              <span style={{fontSize:11,color:C.txD}}>{thisMonth.length} consultas</span>
+            </div>
+            {entries.map(([p,v])=>{
+              const maxCost=entries[0]?.[1]?.cost||1;
+              return <div key={p} style={{marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
+                  <span style={{color:C.tx}}>{provLabels[p]||p} ({v.count})</span>
+                  <span style={{color:provColors[p]||C.tx,fontWeight:600}}>{v.cost.toFixed(4)} USD</span>
+                </div>
+                <div style={{height:5,background:C.sf2,borderRadius:3,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:Math.max(Math.round(v.cost/maxCost*100),2)+"%",background:provColors[p]||C.tx,borderRadius:3}}/>
+                </div>
+              </div>;
+            })}
+            {totalCost>0&&mrr>0&&<div style={{marginTop:12,padding:"8px 12px",background:C.sf2,borderRadius:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+                <span style={{color:C.tx}}>Coste IA vs MRR</span>
+                <span style={{color:C.green,fontWeight:700}}>{(totalCost*0.92).toFixed(2)} EUR ({((totalCost*0.92)/mrr*100).toFixed(1)}%)</span>
+              </div>
+            </div>}
+            {totalCost===0&&<p style={{fontSize:12,color:C.txD}}>Sin consultas este mes. Los costes se calculan automaticamente.</p>}
+          </div>;
+        })()}
+      </Crd>
     </div>
 
     <div style={{marginBottom:16}}>
@@ -2168,7 +2413,7 @@ function Home({go}){
           {t:"Crecimiento",ids:["multiplier","proposal","campaign","metaads","dashboard"]},
           {t:"Inteligencia",ids:["audit","competitor","compliance","reviews"]},
           {t:"Presencia Digital",ids:["scan","deepanalysis","expansion","citations","reputation","voiceseo","brandmonitor","implement"]},
-          {t:"Gestion",ids:["report","manual","clients"]}
+          {t:"Gestion",ids:["report","manual","clients","tasks"]}
         ].map(g=><Crd key={g.t}>
           <h3 style={{fontSize:13,fontWeight:700,color:C.w,margin:"0 0 10px"}}>{g.t}</h3>
           {g.ids.map(id=>{const it=ITEMS.find(x=>x.id===id);if(!it)return null;return(
@@ -2194,7 +2439,7 @@ export default function App(){
     followup:<Followup/>,webstruct:<WebStruct/>,social:<Social/>,gbp:<Gbp/>,video:<Video/>,
     imageprompt:<ImagePrompt/>,
     competitor:<Competitor/>,compliance:<Compliance/>,reviews:<Reviews/>,report:<Report/>,manual:<Manual/>,
-    clients:<Clients/>,scan:<ScanPresencia/>,expansion:<Expansion/>,citations:<CitationsAudit/>,
+    clients:<Clients/>,tasks:<Tasks/>,scan:<ScanPresencia/>,expansion:<Expansion/>,citations:<CitationsAudit/>,
     reputation:<Reputation/>,voiceseo:<VoiceSeo/>,brandmonitor:<BrandMonitor/>,
     deepanalysis:<DeepAnalysis/>,implement:<ImplementHub/>,
     multiplier:<ContentMultiplier/>,proposal:<ProposalGenerator/>,campaign:<MultiCampaign/>,metaads:<MetaAdsPro/>,dashboard:<PredictiveDashboard/>
