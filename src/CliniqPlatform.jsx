@@ -381,8 +381,10 @@ async function ai(sysExtra,prompt,setO,setL,niche,geo,logInfo){
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4096,system:sys,messages:[{role:"user",content:prompt}]})
     });
-    const d=await r.json();
-    if(d.error){setO("ERROR API: "+JSON.stringify(d.error));setL(false);return;}
+    const raw=await r.text();
+    let d;
+    try{d=JSON.parse(raw);}catch(pe){setO("Error del servidor: "+raw.slice(0,200));setL(false);return;}
+    if(d.error){setO("ERROR API: "+(typeof d.error==="string"?d.error:JSON.stringify(d.error)));setL(false);return;}
     const out=(d.content||[]).map(b=>b.text||"").join("\n")||"Sin contenido en la respuesta.";
     setO(out);
     if(out&&!out.startsWith("Error")&&!out.startsWith("ERROR")){
@@ -444,8 +446,10 @@ async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
       })
     });
     if(setPhase) setPhase("analyze");
-    const d=await r.json();
-    if(d.error){setO("ERROR API: "+JSON.stringify(d.error));if(setPhase) setPhase("done");setL(false);return;}
+    const raw=await r.text();
+    let d;
+    try{d=JSON.parse(raw);}catch(pe){setO("Error del servidor: "+raw.slice(0,200));if(setPhase) setPhase("done");setL(false);return;}
+    if(d.error){setO("ERROR API: "+(typeof d.error==="string"?d.error:JSON.stringify(d.error)));if(setPhase) setPhase("done");setL(false);return;}
     const texts=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text||"");
     const searchResults=(d.content||[]).filter(b=>b.type==="web_search_tool_result");
     let output=texts.join("\n");
