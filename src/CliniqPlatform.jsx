@@ -329,22 +329,24 @@ function resolveNiche(nicheLabel,custom){
 /* ── CLIENT QUICK-FILL ── */
 let _qfCache=null;let _qfTime=0;
 function ClientQuickFill({onSelect}){
-  const[cls,setCls]=useState([]);
+  const[cls,setCls]=useState(()=>_qfCache||[]);
   const[v,setV]=useState("");
   useEffect(()=>{
-    const now=Date.now();
-    if(_qfCache&&now-_qfTime<60000){setCls(_qfCache);return;}
+    if(_qfCache&&Date.now()-_qfTime<60000){
+      if(cls.length===0) setCls(_qfCache);
+      return;
+    }
     db.getClients().then(d=>{
-      if(d&&d.length>0){_qfCache=d;_qfTime=now;setCls(d);}
+      if(d&&d.length>0){_qfCache=d;_qfTime=Date.now();setCls(d);}
     }).catch(()=>{});
   },[]);
-  if(cls.length===0) return null;
   const handle=(val)=>{
     setV(val);
-    if(!val){onSelect({});return;}
-    const c=cls.find(x=>(x.nombre||"")==val);
+    if(!val) return;
+    const c=cls.find(x=>(x.nombre||"")===val);
     if(c) onSelect({nombre:c.nombre||"",nicho:c.nicho||"",ciudad:c.ciudad_fiscal||c.ciudadFiscal||"",provincia:c.provincia_fiscal||c.provinciaFiscal||""});
   };
+  if(cls.length===0) return <div style={{height:0,overflow:"hidden"}}/>;
   return <div style={{padding:"8px 12px",background:C.teal+"12",border:"1px solid "+C.teal+"30",borderRadius:8,marginBottom:6}}>
     <div style={{display:"flex",alignItems:"center",gap:8}}>
       <span style={{fontSize:11,color:C.teal,fontWeight:600,whiteSpace:"nowrap"}}>Cliente:</span>
