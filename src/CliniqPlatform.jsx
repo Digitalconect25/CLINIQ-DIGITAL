@@ -1193,21 +1193,149 @@ function ImagePrompt(){
   const[idea,sIdea]=useState("");const[platform,setPlatform]=useState("Midjourney");const[style,setStyle]=useState("Fotografía profesional");
   const[nm,sNm]=useState("");
   const[o,sO]=useState("");const[l,sL]=useState(false);
+  const[imgPrompt,setImgPrompt]=useState("");const[imgModel,setImgModel]=useState("schnell");const[imgSize,setImgSize]=useState("landscape_16_9");
+  const[imgLoading,setImgLoading]=useState(false);const[imgResult,setImgResult]=useState(null);const[imgError,setImgError]=useState("");
+  const[imgHistory,setImgHistory]=useState([]);
   const nR=resolveNiche(ni,cni);
   const platforms=["Midjourney","DALL-E 3","Stable Diffusion","Ideogram","Leonardo AI","Canva IA","Adobe Firefly","Flux","Todos"];
-  return <Tool title="Prompts Imagen IA" subtitle="Prompts optimizados para cada plataforma de IA generativa" out={o} ld={l} label="Prompts" btnTxt="Generar Prompts" btnCl={C.rose} ok={ni&&idea} onGen={()=>
-    ai("Experto en prompt engineering para generacion de imagenes IA en 2026. Prompts para Midjourney v6/DALL-E 3/Flux/SD3/Leonardo EN INGLES. Explicaciones en espanol de Espana.",
-    `PROMPTS DE IMAGEN IA
+
+  const generateImage=async()=>{
+    if(!imgPrompt.trim()) return;
+    setImgLoading(true);setImgError("");setImgResult(null);
+    try{
+      const r=await fetch("/api/image",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({prompt:imgPrompt,model:imgModel,image_size:imgSize,num_images:1})
+      });
+      const data=await r.json();
+      if(!r.ok){setImgError(data.error||"Error generando imagen");setImgLoading(false);return;}
+      if(data.images&&data.images.length>0){
+        setImgResult(data.images[0]);
+        setImgHistory(prev=>[{url:data.images[0].url,prompt:imgPrompt,model:imgModel,date:new Date().toISOString()},...prev].slice(0,12));
+        logActivity("Generador Imagen IA",nm||"Sin asignar",{prompt:imgPrompt.slice(0,100),modelo:imgModel},"Imagen generada: "+data.images[0].url);
+      }
+    }catch(e){setImgError("Error de conexion: "+e.message);}
+    setImgLoading(false);
+  };
+
+  return <div>
+    <div style={{marginBottom:20}}>
+      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Imagen IA</h3>
+      <p style={{fontSize:13,color:C.tx,margin:0}}>Genera prompts optimizados y crea imagenes directamente con Flux AI</p>
+    </div>
+
+    <Tab tabs={[{id:"gen",lb:"Generar Imagen"},{id:"prompts",lb:"Generador Prompts"},{id:"history",lb:"Historial ("+imgHistory.length+")"}]} active={imgResult!==null||imgLoading?"gen":"gen"} onChange={()=>{}}/>
+
+    <div style={{display:"flex",gap:24,flexWrap:"wrap",marginTop:16}}>
+      <div style={{flex:"0 0 400px",maxWidth:"100%"}}>
+        <Crd>
+          <h4 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px",display:"flex",alignItems:"center",gap:8}}>
+            <span style={{background:C.rose,color:C.bg,padding:"2px 8px",borderRadius:4,fontSize:11,fontWeight:700}}>FLUX AI</span>
+            Generar Imagen
+          </h4>
+          <Fld label="Prompt de imagen (en ingles para mejor resultado)">
+            <Txa value={imgPrompt} onChange={setImgPrompt} ph="Ej: Professional dental clinic reception, warm lighting, modern minimalist interior, happy receptionist greeting patient, soft bokeh background, commercial photography style" rows={4}/>
+          </Fld>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,margin:"12px 0"}}>
+            <Fld label="Modelo">
+              <Sel value={imgModel} onChange={setImgModel} opts={[
+                {value:"schnell",label:"Schnell (rapido, ~0.003 USD)"},
+                {value:"dev",label:"Dev (equilibrado, ~0.025 USD)"},
+                {value:"realism",label:"Realism (fotorealista, ~0.025 USD)"},
+                {value:"pro",label:"Pro Ultra (premium, ~0.06 USD)"}
+              ]}/>
+            </Fld>
+            <Fld label="Formato">
+              <Sel value={imgSize} onChange={setImgSize} opts={[
+                {value:"landscape_16_9",label:"Horizontal 16:9"},
+                {value:"landscape_4_3",label:"Horizontal 4:3"},
+                {value:"square_hd",label:"Cuadrado HD"},
+                {value:"square",label:"Cuadrado"},
+                {value:"portrait_4_3",label:"Vertical 4:3"},
+                {value:"portrait_16_9",label:"Vertical 16:9"}
+              ]}/>
+            </Fld>
+          </div>
+          <Fld label="Cliente"><Inp value={nm} onChange={sNm} ph="Nombre del cliente"/></Fld>
+          <Btn primary disabled={!imgPrompt.trim()||imgLoading} color={C.rose} onClick={generateImage} sx={{marginTop:12,width:"100%"}}>
+            {imgLoading?"Generando imagen...":"Generar Imagen"}
+          </Btn>
+          {imgLoading&&<div style={{display:"flex",alignItems:"center",gap:8,marginTop:10}}>
+            <div className="spinner"/>
+            <span style={{fontSize:12,color:C.tx}}>Generando con Flux {imgModel}... puede tardar 5-15s</span>
+          </div>}
+          {imgError&&<div style={{marginTop:10,padding:"8px 12px",background:bg8(C.red),border:"1px solid "+C.red,borderRadius:8,fontSize:12,color:C.red}}>{imgError}</div>}
+        </Crd>
+
+        <Crd sx={{marginTop:16}}>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.w,margin:"0 0 10px"}}>Prompts rapidos</h4>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {[
+              {lb:"Recepcion clinica",p:"Professional medical clinic reception area, warm ambient lighting, modern minimalist design, white and wood tones, potted plants, clean and welcoming atmosphere, commercial interior photography"},
+              {lb:"Doctor consulta",p:"Professional doctor in white coat consulting with patient in modern medical office, warm lighting, empathetic conversation, soft focus background, editorial healthcare photography"},
+              {lb:"Equipo medico",p:"Diverse team of healthcare professionals standing together in modern hospital corridor, confident poses, professional attire, soft natural lighting, corporate team photo style"},
+              {lb:"Tratamiento dental",p:"Modern dental treatment room with advanced equipment, patient comfortable in chair, dentist performing procedure, clean clinical environment, warm LED lighting, professional medical photography"},
+              {lb:"Fachada negocio",p:"Modern professional business storefront exterior, clean signage, large windows, welcoming entrance, daytime natural lighting, urban commercial district, architectural photography"},
+              {lb:"Redes sociales",p:"Flat lay creative social media content arrangement, smartphone, coffee cup, notebook, succulent plant, pastel colors, overhead shot, instagram aesthetic, lifestyle photography"}
+            ].map(q=><button key={q.lb} onClick={()=>setImgPrompt(q.p)} style={{fontSize:11,padding:"5px 10px",background:bg8(C.rose),color:C.rose,border:"1px solid "+C.rose+"40",borderRadius:6,cursor:"pointer"}}>{q.lb}</button>)}
+          </div>
+        </Crd>
+      </div>
+
+      <div style={{flex:1,minWidth:300}}>
+        {imgResult&&<Crd>
+          <div style={{position:"relative",borderRadius:10,overflow:"hidden",marginBottom:12}}>
+            <img src={imgResult.url} alt="Imagen generada" style={{width:"100%",height:"auto",display:"block",borderRadius:10}}/>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <a href={imgResult.url} target="_blank" rel="noopener noreferrer" style={{textDecoration:"none"}}>
+              <Btn small primary color={C.teal}>Abrir original</Btn>
+            </a>
+            <Btn small onClick={()=>navigator.clipboard.writeText(imgResult.url)}>Copiar URL</Btn>
+            <Btn small onClick={()=>navigator.clipboard.writeText(imgPrompt)}>Copiar prompt</Btn>
+            <Btn small color={C.blue} onClick={()=>{
+              const a=document.createElement("a");a.href=imgResult.url;a.download="cliniq-image-"+Date.now()+".png";a.target="_blank";a.click();
+            }}>Descargar</Btn>
+          </div>
+          <div style={{marginTop:10,fontSize:11,color:C.txD,lineHeight:1.5}}>
+            <span style={{color:C.tx}}>Prompt:</span> {imgPrompt.slice(0,150)}{imgPrompt.length>150?"...":""}
+          </div>
+        </Crd>}
+
+        {!imgResult&&!imgLoading&&<Crd sx={{textAlign:"center",padding:"60px 30px"}}>
+          <div style={{fontSize:40,marginBottom:12}}>◧</div>
+          <p style={{color:C.tx,fontSize:14,margin:"0 0 6px"}}>Escribe un prompt o usa uno rapido</p>
+          <p style={{color:C.txD,fontSize:12,margin:0}}>La imagen se mostrara aqui. Modelos desde 0.003 USD/imagen.</p>
+        </Crd>}
+
+        {imgHistory.length>0&&<div style={{marginTop:16}}>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.w,margin:"0 0 10px"}}>Imagenes recientes</h4>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8}}>
+            {imgHistory.map((h,i)=><div key={i} style={{position:"relative",borderRadius:8,overflow:"hidden",cursor:"pointer",border:"1px solid "+C.bd}} onClick={()=>{setImgResult({url:h.url});setImgPrompt(h.prompt);}}>
+              <img src={h.url} alt="" style={{width:"100%",height:80,objectFit:"cover",display:"block"}}/>
+              <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.8))",padding:"12px 6px 4px",fontSize:9,color:"#fff"}}>{h.model}</div>
+            </div>)}
+          </div>
+        </div>}
+      </div>
+    </div>
+
+    <div style={{marginTop:24,borderTop:"1px solid "+C.bd,paddingTop:20}}>
+      <h4 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Generador de Prompts por IA</h4>
+      <Tool title="" subtitle="" out={o} ld={l} label="Prompts" btnTxt="Generar Prompts IA" btnCl={C.purple} ok={ni&&idea} onGen={()=>
+        ai("Experto en prompt engineering para generacion de imagenes IA en 2026. Prompts para Midjourney v6/DALL-E 3/Flux/SD3/Leonardo EN INGLES. Explicaciones en espanol de Espana.",
+        `PROMPTS DE IMAGEN IA
 Sector: ${nR}. Centro: ${nm||"[Negocio]"}. Idea: ${idea}. Plataforma: ${platform}. Estilo: ${style}.
 Genera 4 prompts COMPLETOS listos para copiar, con parametros, negative prompt, instrucciones uso, tips del sector.`,sO,sL,nR,"Espana",
-    {tool:"Prompts Imagen IA",client:nm||"Sin asignar",inputs:{idea:idea,plataforma:platform}})}
-    fields={<>
-      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
-      <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
-      <Fld label="Idea / Concepto *"><Txa value={idea} onChange={sIdea} ph="Ej: Foto recepcion clinica con ambiente calido..." rows={3}/></Fld>
-      <Fld label="Plataforma IA"><Sel value={platform} onChange={setPlatform} opts={platforms}/></Fld>
-      <Fld label="Estilo visual"><Sel value={style} onChange={setStyle} opts={["Fotografía profesional","Fotografía lifestyle","Ilustración moderna","3D render","Minimalista","Cinematográfico","Editorial"]}/></Fld>
-    </>}/>;
+        {tool:"Prompts Imagen IA",client:nm||"Sin asignar",inputs:{idea:idea,plataforma:platform}})}
+        fields={<>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <Fld label="Idea / Concepto *"><Txa value={idea} onChange={sIdea} ph="Ej: Foto recepcion clinica con ambiente calido..." rows={3}/></Fld>
+          <Fld label="Plataforma IA"><Sel value={platform} onChange={setPlatform} opts={platforms}/></Fld>
+          <Fld label="Estilo visual"><Sel value={style} onChange={setStyle} opts={["Fotografía profesional","Fotografía lifestyle","Ilustración moderna","3D render","Minimalista","Cinematográfico","Editorial"]}/></Fld>
+        </>}/>
+    </div>
+  </div>;
 }
 
 function ImplementHub(){
