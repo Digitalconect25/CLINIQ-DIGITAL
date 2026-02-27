@@ -1564,7 +1564,7 @@ function Clients(){
   const filteredLog=logFilter==="all"?allLog:getLogForClient(logFilter);
   const clientNames=[...new Set(allLog.map(e=>e.client))].filter(n=>n!=="Sin asignar");
 
-  const ClientForm=()=><Crd sx={{marginBottom:20}}>
+  const ClientFormJSX=<Crd sx={{marginBottom:20}}>
     <h4 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 16px"}}>{editId?"Editar Cliente":"Nuevo Cliente"}</h4>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:16}}>
       <Fld label="Nombre / Razón Social *"><Inp value={f.nombre} onChange={v=>setF({...f,nombre:v})} ph="Nombre"/></Fld>
@@ -1603,7 +1603,7 @@ function Clients(){
 
     <Tab tabs={[{id:"list",lb:"Clientes"},{id:"log",lb:"Biblioteca ("+allLog.length+")"},{id:"logclient",lb:"Log por Cliente"}]} active={tab} onChange={setTab}/>
 
-    {tab==="list"&&show&&<ClientForm/>}
+    {tab==="list"&&show&&ClientFormJSX}
 
     {tab==="list"&&cls.map(c=>{
       const clientLog=getLogForClient(c.nombre);
