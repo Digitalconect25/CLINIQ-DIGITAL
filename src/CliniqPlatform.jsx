@@ -143,6 +143,7 @@ const MENU = [
   {id:"multiplier",ic:"⊛",lb:"Multiplicador Contenido",cl:C.cyan},
   {id:"proposal",ic:"◰",lb:"Propuestas Comerciales",cl:C.gold},
   {id:"campaign",ic:"⊕",lb:"Campañas Multicanal",cl:C.rose},
+  {id:"metaads",ic:"◎",lb:"Meta Ads Pro",cl:C.blue},
   {id:"dashboard",ic:"◫",lb:"Dashboard Predictivo",cl:C.green},
   {g:"ESTRATEGIA"},
   {id:"report",ic:"◰",lb:"Reporting Mensual",cl:C.teal},
@@ -314,16 +315,20 @@ function Out({content,loading,label}){
   useEffect(()=>{if(ref.current)ref.current.scrollTop=ref.current.scrollHeight;},[content]);
   return <div style={{background:C.bg,border:"1px solid "+C.bd,borderRadius:12,overflow:"hidden",flex:1,display:"flex",flexDirection:"column",minHeight:300}}>
     <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.bd,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-      <span style={{fontSize:11,fontWeight:600,color:C.tx,letterSpacing:0.5,textTransform:"uppercase"}}>{label||"Resultado"}</span>
-      {content&&<div style={{display:"flex",gap:6}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <span style={{fontSize:11,fontWeight:600,color:C.tx,letterSpacing:0.5,textTransform:"uppercase"}}>{label||"Resultado"}</span>
+        {loading&&<div className="spinner" style={{width:12,height:12}}/>}
+      </div>
+      {content&&!loading&&<div style={{display:"flex",gap:6}}>
         <Btn small onClick={()=>navigator.clipboard.writeText(content)}>Copiar</Btn>
         <Btn small onClick={()=>{const w=window.open("","_blank");w.document.write("<pre style='font-family:sans-serif;padding:40px;line-height:1.8;max-width:800px;margin:auto'>"+content.replace(/</g,"&lt;")+"</pre>");w.document.title="Cliniq Digital - Exportar";}}>Imprimir</Btn>
       </div>}
     </div>
     <div ref={ref} style={{padding:20,flex:1,overflowY:"auto",maxHeight:600}}>
-      {loading?<div style={{display:"flex",alignItems:"center",gap:12,color:C.teal}}>
+      {content?<div style={{fontSize:14,color:C.w,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{content}{loading&&<span style={{display:"inline-block",width:6,height:16,background:C.teal,marginLeft:2,animation:"blink 1s infinite",verticalAlign:"text-bottom"}}/>}</div>
+      :loading?<div style={{display:"flex",alignItems:"center",gap:12,color:C.teal}}>
         <div className="spinner"/><span style={{fontSize:14}}>Generando con IA...</span>
-      </div>:content?<div style={{fontSize:14,color:C.w,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{content}</div>
+      </div>
       :<p style={{fontSize:14,color:C.txD,fontStyle:"italic"}}>Configura los parámetros y pulsa generar.</p>}
     </div>
   </div>;
@@ -379,17 +384,40 @@ async function ai(sysExtra,prompt,setO,setL,niche,geo,logInfo){
   try{
     const r=await fetch("/api/generate",{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4096,system:sys,messages:[{role:"user",content:prompt}]})
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4096,stream:true,system:sys,messages:[{role:"user",content:prompt}]})
     });
-    const raw=await r.text();
-    let d;
-    try{d=JSON.parse(raw);}catch(pe){setO("Error del servidor: "+raw.slice(0,200));setL(false);return;}
-    if(d.error){setO("ERROR API: "+(typeof d.error==="string"?d.error:JSON.stringify(d.error)));setL(false);return;}
-    const out=(d.content||[]).map(b=>b.text||"").join("\n")||"Sin contenido en la respuesta.";
-    setO(out);
-    if(out&&!out.startsWith("Error")&&!out.startsWith("ERROR")){
+    if(!r.ok){
+      const errRaw=await r.text();
+      let errMsg;try{errMsg=JSON.parse(errRaw).error||errRaw.slice(0,200);}catch(e){errMsg=errRaw.slice(0,200);}
+      setO("ERROR API: "+(typeof errMsg==="string"?errMsg:JSON.stringify(errMsg)));setL(false);return;
+    }
+    const reader=r.body.getReader();
+    const decoder=new TextDecoder();
+    let full="";let buffer="";
+    while(true){
+      const{done,value}=await reader.read();
+      if(done) break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split("\n");
+      buffer=lines.pop()||"";
+      for(const line of lines){
+        if(!line.startsWith("data: ")) continue;
+        const raw=line.slice(6);
+        if(raw==="[DONE]") continue;
+        try{
+          const ev=JSON.parse(raw);
+          if(ev.type==="error"){setO("ERROR API: "+(ev.error?.message||JSON.stringify(ev.error)));setL(false);return;}
+          if(ev.type==="content_block_delta"&&ev.delta?.type==="text_delta"&&ev.delta.text){
+            full+=ev.delta.text;
+            setO(full);
+          }
+        }catch(pe){}
+      }
+    }
+    if(!full) setO("Sin contenido en la respuesta.");
+    if(full&&!full.startsWith("Error")&&!full.startsWith("ERROR")){
       const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);
-      logActivity(toolName,logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),out);
+      logActivity(toolName,logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full);
     }
   }catch(e){setO("Error de conexion: "+e.message);}
   setL(false);
@@ -431,7 +459,7 @@ function extractInputs(prompt){
   return inputs;
 }
 
-/* ── AI WITH WEB SEARCH ── */
+/* ── AI WITH WEB SEARCH (STREAMING) ── */
 async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
   setL(true);setO("");
   if(setPhase) setPhase("search");
@@ -440,34 +468,63 @@ async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
     const r=await fetch("/api/generate",{
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
-        model:"claude-sonnet-4-20250514",max_tokens:8192,system:sys,
+        model:"claude-sonnet-4-20250514",max_tokens:8192,stream:true,system:sys,
         messages:[{role:"user",content:prompt}],
         tools:[{type:"web_search_20250305",name:"web_search"}]
       })
     });
-    if(setPhase) setPhase("analyze");
-    const raw=await r.text();
-    let d;
-    try{d=JSON.parse(raw);}catch(pe){setO("Error del servidor: "+raw.slice(0,200));if(setPhase) setPhase("done");setL(false);return;}
-    if(d.error){setO("ERROR API: "+(typeof d.error==="string"?d.error:JSON.stringify(d.error)));if(setPhase) setPhase("done");setL(false);return;}
-    const texts=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text||"");
-    const searchResults=(d.content||[]).filter(b=>b.type==="web_search_tool_result");
-    let output=texts.join("\n");
-    if(searchResults.length>0){
-      output+="\n\n---\nFUENTES CONSULTADAS EN INTERNET:\n";
-      searchResults.forEach((sr,i)=>{
-        if(sr.content){
-          const webPages=sr.content.filter(c=>c.type==="web_search_result");
-          webPages.forEach(wp=>{
-            if(wp.url&&wp.title) output+=`- ${wp.title}: ${wp.url}\n`;
-          });
-        }
-      });
+    if(!r.ok){
+      const errRaw=await r.text();
+      let errMsg;try{errMsg=JSON.parse(errRaw).error||errRaw.slice(0,200);}catch(e){errMsg=errRaw.slice(0,200);}
+      setO("ERROR API: "+(typeof errMsg==="string"?errMsg:JSON.stringify(errMsg)));
+      if(setPhase) setPhase("done");setL(false);return;
     }
-    setO(output||"No se encontraron resultados. Verifica los datos e intenta de nuevo.");
-    if(output){
+    const reader=r.body.getReader();
+    const decoder=new TextDecoder();
+    let full="";let buffer="";let searchingPhase=true;let sources=[];
+    while(true){
+      const{done,value}=await reader.read();
+      if(done) break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split("\n");
+      buffer=lines.pop()||"";
+      for(const line of lines){
+        if(!line.startsWith("data: ")) continue;
+        const raw=line.slice(6);
+        if(raw==="[DONE]") continue;
+        try{
+          const ev=JSON.parse(raw);
+          if(ev.type==="error"){setO("ERROR API: "+(ev.error?.message||JSON.stringify(ev.error)));if(setPhase) setPhase("done");setL(false);return;}
+          if(ev.type==="content_block_start"){
+            if(ev.content_block?.type==="web_search_tool_result"){
+              if(searchingPhase&&setPhase){setPhase("analyze");searchingPhase=false;}
+            }
+            if(ev.content_block?.type==="text"&&searchingPhase&&setPhase){setPhase("analyze");searchingPhase=false;}
+          }
+          if(ev.type==="content_block_delta"&&ev.delta?.type==="text_delta"&&ev.delta.text){
+            full+=ev.delta.text;
+            setO(full);
+          }
+          if(ev.type==="content_block_start"&&ev.content_block?.type==="web_search_tool_result"){
+            const sr=ev.content_block;
+            if(sr.content){
+              sr.content.filter(c=>c.type==="web_search_result"&&c.url&&c.title).forEach(wp=>{
+                sources.push({title:wp.title,url:wp.url});
+              });
+            }
+          }
+        }catch(pe){}
+      }
+    }
+    if(sources.length>0){
+      full+="\n\n---\nFUENTES CONSULTADAS EN INTERNET:\n";
+      sources.forEach(s=>{full+=`- ${s.title}: ${s.url}\n`;});
+      setO(full);
+    }
+    if(!full) setO("No se encontraron resultados. Verifica los datos e intenta de nuevo.");
+    if(full){
       const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);
-      logActivity(toolName+" (Web)",logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),output);
+      logActivity(toolName+" (Web)",logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full);
     }
   }catch(e){setO("Error de conexion: "+e.message);}
   if(setPhase) setPhase("done");
@@ -524,21 +581,23 @@ function OutSearch({content,loading,label,phase}){
     <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.bd,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span style={{fontSize:11,fontWeight:600,color:C.tx,letterSpacing:0.5,textTransform:"uppercase"}}>{label||"Resultado"}</span>
+        {loading&&<div className="spinner" style={{width:12,height:12}}/>}
         {loading&&phase&&<span style={{fontSize:10,color:C.cyan,fontWeight:600,padding:"2px 8px",background:bg8(C.cyan),borderRadius:4}}>{phaseLabels[phase]||phase}</span>}
       </div>
-      {content&&<div style={{display:"flex",gap:6}}>
+      {content&&!loading&&<div style={{display:"flex",gap:6}}>
         <Btn small onClick={()=>navigator.clipboard.writeText(content)}>Copiar</Btn>
         <Btn small onClick={()=>{const w=window.open("","_blank");w.document.write("<pre style='font-family:sans-serif;padding:40px;line-height:1.8;max-width:800px;margin:auto'>"+content.replace(/</g,"&lt;")+"</pre>");w.document.title="Cliniq Digital - Exportar";}}>Imprimir</Btn>
       </div>}
     </div>
     <div ref={ref} style={{padding:20,flex:1,overflowY:"auto",maxHeight:700}}>
-      {loading?<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16,paddingTop:40}}>
+      {content?<div style={{fontSize:14,color:C.w,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{content}{loading&&<span style={{display:"inline-block",width:6,height:16,background:C.teal,marginLeft:2,animation:"blink 1s infinite",verticalAlign:"text-bottom"}}/>}</div>
+      :loading?<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16,paddingTop:40}}>
         <div className="spinner" style={{width:24,height:24,borderWidth:3}}/>
         <span style={{fontSize:14,color:C.teal}}>{phaseLabels[phase]||"Generando..."}</span>
         {phase==="search"&&<div style={{maxWidth:300,textAlign:"center"}}>
           <p style={{fontSize:12,color:C.txD,lineHeight:1.6}}>La IA busca datos reales del negocio en Internet: presencia en plataformas, resenas, menciones, competencia y mas.</p>
         </div>}
-      </div>:content?<div style={{fontSize:14,color:C.w,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{content}</div>
+      </div>
       :<p style={{fontSize:14,color:C.txD,fontStyle:"italic"}}>Configura los parámetros y pulsa generar.</p>}
     </div>
   </div>;
@@ -1760,6 +1819,416 @@ ${budget!=="Sin inversión en ads"?`- Distribucion presupuesto ${budget} por can
   </div>;
 }
 
+/* ══════ META ADS PRO ══════ */
+function MetaAdsPro(){
+  const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[tx,sTx]=useState("");const[ctx,sCtx]=useState("");
+  const[nm,sNm]=useState("");const[ci,sCi]=useState("");const[pv,sPv]=useState("");const[br,sBr]=useState("");
+  const[web,sWeb]=useState("");const[obj,sObj]=useState("Conversiones (leads/citas)");
+  const[budget,sBudget]=useState("300-500 EUR/mes");const[dur,sDur]=useState("30 dias");
+  const[audience,sAudience]=useState("");const[comp,sComp]=useState("");
+  const[usp,sUsp]=useState("");const[offer,sOffer]=useState("");
+  const[prevAds,sPrevAds]=useState("No, primera campaña");
+  const[tab,setTab]=useState("strategy");
+  const[o,sO]=useState("");const[l,sL]=useState(false);const[phase,setPhase]=useState(null);
+  const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);const srv=resolveTx(tx,ctx);
+
+  const genStrategy=()=>{
+    setTab("strategy");
+    aiSearch("Eres un Media Buyer senior especializado en Meta Ads (Facebook + Instagram) para negocios locales en Espana. Tienes experiencia real gestionando campanas del sector sanitario y servicios profesionales con presupuestos de 300 a 5000 EUR/mes. Conoces las politicas publicitarias de Meta para el sector salud. Busca datos reales de benchmarks del sector. Genera recomendaciones ACCIONABLES Y REALISTAS, no teoricas. Responde en espanol de Espana.",
+    `ESTRATEGIA META ADS PROFESIONAL COMPLETA
+Centro: "${nm||"[Nombre]"}". Sector: ${nR}. Servicio foco: "${srv||"General"}". Localizacion: ${geo}. Web: ${web||"No proporcionada"}.
+Objetivo: ${obj}. Presupuesto: ${budget}. Duracion: ${dur}. Experiencia previa ads: ${prevAds}.
+Audiencia: ${audience||"Por definir"}. Competencia: ${comp||"No especificada"}. Diferenciador: ${usp||"No especificado"}. Oferta: ${offer||"Sin oferta especifica"}.
+
+BUSCA: CPM medio en Espana para ${nR}, CTR benchmark sector salud/servicios, coste por lead medio sector, mejores practicas Meta Ads ${nR} Espana 2025-2026.
+
+GENERA ESTRATEGIA COMPLETA:
+
+1. DIAGNOSTICO PRE-CAMPANA
+- Evaluacion del objetivo vs presupuesto (es realista? que esperar?)
+- Analisis de la competencia publicitaria en Meta para ${nR} en ${geo}
+- Politicas de Meta Ads que aplican al sector (restricciones salud, claims prohibidos, audiencias limitadas)
+- Estado del pixel/CAPI: que necesita tener configurado antes de lanzar
+- Requisitos legales (LOPD, consentimiento cookies, politica privacidad)
+
+2. ARQUITECTURA DE CAMPANAS
+Estructura EXACTA para configurar en Meta Ads Manager:
+
+CAMPANA 1 - PROSPECCION FRIA
+- Objetivo de campana en Meta: [especificar exacto]
+- Optimizacion de entrega: [especificar]
+- Presupuesto diario recomendado: [calcular del total]
+- Duracion: [especificar]
+
+  Conjunto de anuncios 1A - Intereses amplios
+  - Segmentacion: edad, genero, ubicacion (radio km desde ${ci}), intereses [listar 8-12 intereses especificos del sector]
+  - Ubicaciones: [Feed, Stories, Reels - recomendar cuales y por que]
+  - Exclusiones: [que excluir]
+  
+  Conjunto de anuncios 1B - Lookalike (si hay datos)
+  - Fuente del lookalike: [especificar]
+  - Porcentaje: [1%, 2%?]
+  - Ubicaciones: [recomendar]
+
+CAMPANA 2 - RETARGETING
+- Objetivo: [especificar]
+- Presupuesto diario: [calcular]
+- Ventanas de retargeting: [visitantes web 7d, 14d, 30d; engagement IG/FB]
+
+  Conjunto de anuncios 2A - Visitantes web
+  - Audiencia: [configuracion exacta]
+  - Frecuencia objetivo: [especificar]
+  
+  Conjunto de anuncios 2B - Engagement social
+  - Audiencia: [personas que interactuaron con perfil IG/FB]
+
+${parseFloat(budget)>800||budget.includes("1000")||budget.includes("2000")||budget.includes("5000")?`CAMPANA 3 - CONVERSION DIRECTA
+- Solo si presupuesto lo permite
+- Objetivo: Conversiones
+- Audiencia: combinacion de senales calientes`:""}
+
+3. DISTRIBUCION DE PRESUPUESTO
+- Desglose exacto del presupuesto ${budget} por campana, por dia, por semana
+- Fase de aprendizaje: cuanto destinar y durante cuanto tiempo
+- Fase de optimizacion: cuando y como redistribuir
+- Reserva para testing creativo: [porcentaje]
+- Tabla con distribucion semanal
+
+4. RECOMENDACION DE FORMATO: IMAGEN vs VIDEO vs CARRUSEL
+Para CADA conjunto de anuncios, recomienda el formato optimo y JUSTIFICA con datos del sector:
+
+FORMATO A - IMAGEN ESTATICA
+- Cuando usar: [escenarios concretos]
+- Tamanos requeridos: 1080x1080 (feed), 1080x1920 (stories/reels)
+- Numero de variantes a crear: [minimo 3-4]
+- Ventajas para ${nR}: [especificar]
+- CPM/CTR esperado vs otros formatos
+
+FORMATO B - VIDEO
+- Cuando usar: [escenarios]
+- Duraciones optimas: 6s, 15s, 30s (para que sirve cada una)
+- Formatos: 1:1 (feed), 9:16 (stories/reels), 4:5 (feed vertical)
+- Ventajas para ${nR}: [especificar]
+- CPM/CTR esperado
+
+FORMATO C - CARRUSEL
+- Cuando usar: [escenarios]
+- Numero optimo de tarjetas: [especificar]
+- Estructura narrativa recomendada por tarjeta
+- Ventajas para ${nR}
+
+VEREDICTO: Para ${nR} con objetivo "${obj}" y presupuesto ${budget}, el formato principal deberia ser [X] porque [justificacion con datos]. Complementar con [Y] para [razon].
+
+5. CREATIVIDADES - ANUNCIOS COMPLETOS (6 anuncios)
+
+ANUNCIO 1 - IMAGEN PRINCIPAL (Prospeccion)
+- Formato: [1080x1080 o 1080x1920]
+- Copy primario (texto principal): [TEXTO COMPLETO max 125 chars visibles]
+- Titulo: [max 40 chars]
+- Descripcion: [max 30 chars]
+- CTA button: [Reservar, Mas informacion, Enviar mensaje, etc.]
+- Prompt EXACTO para generar la imagen con IA (Midjourney/DALL-E):
+  """
+  [Prompt detallado y profesional en ingles, con estilo fotografico realista, iluminacion, composicion, elementos del sector ${nR}, que transmita confianza y profesionalidad. NO incluir texto en la imagen. Especificar --ar 1:1 o --ar 9:16]
+  """
+- Negative prompt: [que evitar]
+- Notas para diseñador: [si se usa fotografía real en vez de IA]
+
+ANUNCIO 2 - IMAGEN STORIES/REELS (Prospeccion)
+- Formato: 1080x1920
+- Copy, titulo, descripcion, CTA
+- Prompt IA imagen (9:16 vertical)
+- Overlay de texto sugerido (posicion, tamaño, contenido)
+
+ANUNCIO 3 - CARRUSEL EDUCATIVO (Prospeccion)
+- Numero de tarjetas: [4-6]
+- Para CADA tarjeta: titulo + descripcion + prompt IA imagen
+- Copy principal del anuncio
+- CTA
+
+ANUNCIO 4 - VIDEO SCRIPT (Prospeccion)
+- Duracion: [15s o 30s]
+- Guion segundo a segundo con indicaciones visuales
+- Texto overlay por escena
+- Musica/audio sugerido
+- Thumbnail: prompt IA para miniatura
+- Copy del anuncio
+
+ANUNCIO 5 - RETARGETING IMAGEN (Retargeting)
+- Copy con urgencia suave / social proof
+- Prompt IA imagen (diferente al de prospeccion, mas cercano/testimonial)
+- CTA directo
+
+ANUNCIO 6 - RETARGETING CARRUSEL TESTIMONIOS (Retargeting)
+- Estructura: testimonios + resultados + CTA
+- Prompt IA por tarjeta
+- Copy del anuncio
+
+6. TEXTOS PUBLICITARIOS (A/B TESTING)
+Para cada anuncio, genera 3 variantes del copy:
+- Variante A: Enfoque emocional/dolor
+- Variante B: Enfoque racional/datos
+- Variante C: Enfoque social proof/autoridad
+Todos cumpliendo politicas de Meta para ${nR}.
+
+7. LANDING PAGE / DESTINO
+- Que pagina de destino usar y por que
+- Elementos obligatorios en la landing para maximizar conversion
+- Coherencia mensaje anuncio-landing (message match)
+- Formulario: campos minimos recomendados
+- Tracking: eventos de pixel a configurar (ViewContent, Lead, Schedule, etc.)
+
+8. CONFIGURACION PIXEL Y TRACKING
+- Eventos estandar a configurar: [listar cada uno]
+- Conversiones personalizadas si aplican
+- CAPI (Conversions API): recomendacion de implementacion
+- UTMs para cada campana/conjunto
+
+9. PROYECCION DE RESULTADOS (REALISTA)
+Con presupuesto ${budget} en ${dur}, para ${nR} en ${geo}:
+
+Tabla de estimacion CONSERVADORA:
+| Metrica | Estimacion baja | Estimacion media | Estimacion alta |
+| Impresiones/mes | | | |
+| Alcance | | | |
+| CTR | | | |
+| Clics al sitio | | | |
+| CPM | | | |
+| CPC | | | |
+| Leads/consultas | | | |
+| Coste por lead | | | |
+| Tasa conversion lead-paciente | | | |
+| Nuevos pacientes/mes | | | |
+| Facturacion estimada | | | |
+| ROAS | | | |
+
+IMPORTANTE: Usa benchmarks REALES del sector ${nR} en Espana. CPL tipico, ROAS tipico, tasas de conversion. No infles numeros.
+
+10. CALENDARIO DE OPTIMIZACION
+- Dia 1-3: [que hacer]
+- Dia 4-7: [primera revision, que mirar]
+- Semana 2: [optimizaciones]
+- Semana 3-4: [escalar o pivotar]
+- Mes 2+: [consolidar]
+- Reglas automaticas recomendadas en Meta Ads Manager
+- Senales de alarma: cuando pausar un anuncio
+- Senales positivas: cuando escalar presupuesto
+
+11. CUMPLIMIENTO Y POLITICAS META
+- Restricciones especificas para ${nR}
+- Palabras/claims que Meta rechaza en este sector
+- Como pasar revision de anuncios a la primera
+- Audiencias restringidas (salud, edad, etc.)
+- Disclaimer obligatorio si aplica`,sO,sL,nR,geo,setPhase,
+    {tool:"Meta Ads Pro",client:nm||"Sin asignar",inputs:{servicio:srv,objetivo:obj,presupuesto:budget}});
+  };
+
+  const genCreatives=()=>{
+    setTab("creatives");
+    ai("Eres un director creativo de una agencia de performance marketing especializada en Meta Ads para negocios locales. Tu fortaleza es crear creatividades que CONVIERTEN: copies que pasan la revision de Meta, imagenes que detienen el scroll, y prompts de IA que generan fotos realistas y profesionales del sector. Cada prompt de imagen debe ser extremadamente detallado y profesional.",
+    `PACK CREATIVO COMPLETO PARA META ADS
+Centro: "${nm||"[Nombre]"}". Sector: ${nR}. Servicio: "${srv||"General"}". Localizacion: ${geo}.
+Objetivo: ${obj}. Diferenciador: ${usp||"No especificado"}. Oferta: ${offer||"Sin oferta"}.
+
+GENERA 10 CREATIVIDADES COMPLETAS LISTAS PARA PRODUCIR:
+
+================================================================
+CREATIVIDAD 1 - HERO IMAGE (Feed 1:1)
+================================================================
+Formato: 1080x1080px
+Ubicacion: Feed Facebook + Instagram
+
+COPY PRINCIPAL (3 variantes):
+A (emocional): [texto completo, max 125 chars primera linea visible + extension]
+B (racional): [texto completo]
+C (social proof): [texto completo]
+
+TITULO: [max 40 chars] (3 variantes)
+DESCRIPCION: [max 30 chars]
+CTA: [boton especifico de Meta]
+
+PROMPT IMAGEN IA (Midjourney v6):
+"""
+[Prompt hiper-detallado en ingles. Debe incluir:
+- Sujeto principal (persona real, no stock, etnia mediterranea si aplica)
+- Entorno especifico del sector ${nR} (recepcion clinica, consulta, etc.)
+- Iluminacion (natural suave, golden hour, clinica profesional)
+- Composicion (regla de tercios, espacio para texto overlay)
+- Estilo fotografico (editorial, lifestyle, documental)
+- Paleta de color (calida, fria, neutra)
+- Detalles de vestuario y atrezzo del sector
+- Emocion/expresion del sujeto
+- NO texto en la imagen
+- Parametros: --ar 1:1 --v 6 --style raw --s 200]
+"""
+NEGATIVE PROMPT: [que evitar especificamente]
+ALTERNATIVA DALL-E 3: [prompt adaptado para DALL-E]
+
+OVERLAY DE TEXTO (si aplica):
+- Posicion: [superior/inferior/centro]
+- Texto: [max 20% de la imagen segun politica Meta]
+- Tipografia sugerida: [nombre + peso]
+- Color texto: [hex]
+
+================================================================
+CREATIVIDAD 2 - STORIES/REELS VERTICAL (9:16)
+================================================================
+Formato: 1080x1920px
+Ubicacion: Stories + Reels Instagram y Facebook
+
+[Misma estructura: copy x3, titulo, CTA, prompt IA vertical con --ar 9:16, overlay]
+
+================================================================
+CREATIVIDAD 3 - CARRUSEL PROCESO (Feed)
+================================================================
+Formato: 1080x1080px x 5 tarjetas
+Concepto: Mostrar el proceso paso a paso de "${srv}" para reducir incertidumbre
+
+TARJETA 1 (Gancho):
+- Texto overlay: [frase gancho]
+- Prompt IA: [descripcion de imagen que genere curiosidad]
+
+TARJETA 2 (Paso 1 - Consulta):
+- Texto overlay: [paso]
+- Prompt IA: [imagen especifica]
+
+TARJETA 3 (Paso 2 - Procedimiento):
+- Texto overlay: [paso]
+- Prompt IA: [imagen especifica]
+
+TARJETA 4 (Paso 3 - Resultado):
+- Texto overlay: [paso]
+- Prompt IA: [imagen especifica, expresion satisfecha]
+
+TARJETA 5 (CTA):
+- Texto overlay: [CTA + oferta si hay]
+- Prompt IA: [imagen del centro/equipo, transmitir confianza]
+
+COPY del anuncio: [texto completo]
+
+================================================================
+CREATIVIDAD 4 - ANTES/CONCEPTO (Feed 4:5)
+================================================================
+Formato: 1080x1350px (4:5 vertical, maximo espacio en feed)
+Concepto: Mostrar transformacion sin before/after prohibido (usar concepto/aspiracion)
+
+[Copy x3, prompt IA que esquive restricciones de Meta para salud, overlay]
+
+================================================================
+CREATIVIDAD 5 - TESTIMONIO SOCIAL PROOF (Feed 1:1)
+================================================================
+Formato: 1080x1080px
+Concepto: Resena real estilizada como creatividad
+
+[Copy con testimonio (marcador para real), prompt IA persona satisfecha en entorno local ${geo}, overlay con cita]
+
+================================================================
+CREATIVIDAD 6 - VIDEO SCRIPT 15s (Stories/Reels)
+================================================================
+Formato: 1080x1920 vertical, 15 segundos
+
+SEGUNDO 0-3 (GANCHO):
+- Visual: [que se ve]
+- Audio/voz: [que se dice/escucha]
+- Texto pantalla: [overlay]
+
+SEGUNDO 3-8 (PROBLEMA/SOLUCION):
+- Visual: [transicion + escena]
+- Audio/voz: [texto]
+- Texto pantalla: [overlay]
+
+SEGUNDO 8-13 (PRUEBA/RESULTADO):
+- Visual: [escena]
+- Audio/voz: [texto]
+- Texto pantalla: [overlay]
+
+SEGUNDO 13-15 (CTA):
+- Visual: [escena final]
+- Audio/voz: [CTA hablado]
+- Texto pantalla: [CTA + info contacto]
+
+THUMBNAIL: Prompt IA para miniatura
+MUSICA: [sugerir tipo/mood, no track especifico]
+COPY del anuncio: [texto]
+
+================================================================
+CREATIVIDAD 7 - VIDEO SCRIPT 30s (Feed)
+================================================================
+Formato: 1080x1080 o 1080x1350, 30 segundos
+[Guion segundo a segundo mas detallado, estructura problema-agitacion-solucion-CTA]
+
+================================================================
+CREATIVIDAD 8 - RETARGETING (Feed 1:1)
+================================================================
+Concepto: Para personas que ya visitaron la web o interactuaron
+[Copy con urgencia suave, prompt IA mas cercano/personal, CTA directo]
+
+================================================================
+CREATIVIDAD 9 - OFERTA/PROMO (Stories)
+================================================================
+Concepto: ${offer||"Primera consulta gratuita / valoracion sin compromiso"}
+[Prompt IA con elementos graficos (no texto en foto), overlay con oferta clara, copy con deadline]
+
+================================================================
+CREATIVIDAD 10 - AUTORIDAD/EQUIPO (Feed)
+================================================================
+Concepto: Posicionar al profesional como referente
+[Prompt IA del profesional en entorno de trabajo, transmitir experiencia y cercania, copy con credenciales]
+
+================================================================
+RESUMEN DE PRODUCCION
+================================================================
+- Total piezas graficas necesarias: [contar]
+- Total prompts IA listos: [contar]
+- Total videos a producir: [contar]
+- Estimacion tiempo produccion: [horas]
+- Orden de prioridad para lanzar: [cual primero]
+- Testing plan: que creatividades enfrentar en A/B test
+- Rotacion creativa: cuando cambiar creatividades (fatiga)`,sO,sL,nR,geo,
+    {tool:"Meta Ads Pro - Creatividades",client:nm||"Sin asignar",inputs:{servicio:srv,objetivo:obj}});
+  };
+
+  return <div>
+    <div style={{marginBottom:20}}>
+      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Meta Ads Pro</h3>
+      <p style={{fontSize:13,color:C.tx,margin:0}}>Campañas profesionales de Facebook e Instagram Ads con creatividades, prompts y proyección</p>
+    </div>
+    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
+      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <TreatmentSelector niche={ni} treatment={tx} setTreatment={sTx} customTx={ctx} setCustomTx={sCtx} label="Servicio foco de la campaña"/>
+          <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
+          <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
+          <Fld label="Web"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
+          <Fld label="Objetivo de campaña"><Sel value={obj} onChange={sObj} opts={["Conversiones (leads/citas)","Trafico cualificado a web","Mensajes WhatsApp/Messenger","Reconocimiento de marca local","Reproducciones de video","Generación de formularios (Lead Ads)"]}/></Fld>
+          <Fld label="Presupuesto mensual"><Sel value={budget} onChange={sBudget} opts={["150-300 EUR/mes","300-500 EUR/mes","500-1000 EUR/mes","1000-2000 EUR/mes","2000-5000 EUR/mes","+5000 EUR/mes"]}/></Fld>
+          <Fld label="Duración"><Sel value={dur} onChange={sDur} opts={["15 dias (test)","30 dias","60 dias","90 dias","Continua"]}/></Fld>
+          <Fld label="Experiencia previa con ads"><Sel value={prevAds} onChange={sPrevAds} opts={["No, primera campaña","Si, con resultados pobres","Si, con resultados aceptables","Si, quiero escalar"]}/></Fld>
+          <Fld label="Público objetivo"><Txa value={audience} onChange={sAudience} ph="Ej: Mujeres 30-55, nivel medio-alto, interesadas en estetica, zona Alicante centro + Playa San Juan..." rows={2}/></Fld>
+          <Fld label="Diferenciador clave"><Inp value={usp} onChange={sUsp} ph="Ej: 20 años experiencia, tecnologia exclusiva, unico en la zona..."/></Fld>
+          <Fld label="Oferta / gancho"><Inp value={offer} onChange={sOffer} ph="Ej: Primera consulta gratuita, 20% dto febrero..."/></Fld>
+          <Fld label="Competencia ads"><Inp value={comp} onChange={sComp} ph="Competidores que anuncian en Meta"/></Fld>
+
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <Btn primary disabled={!ni||!nm||!ci} color={C.blue} onClick={genStrategy} sx={{flex:1}}>Estrategia + Proyección</Btn>
+            <Btn primary disabled={!ni||!nm} color={C.rose} onClick={genCreatives} sx={{flex:1}}>Pack Creativo (10 anuncios)</Btn>
+          </div>
+        </div>
+      </Crd></div>
+      <div style={{flex:1,minWidth:300}}>
+        {(o||l)&&<div style={{marginBottom:12}}>
+          <div style={{display:"flex",gap:4,background:C.sf2,borderRadius:8,padding:4}}>
+            <button onClick={()=>setTab("strategy")} style={{flex:1,padding:"8px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab==="strategy"?C.sf:"transparent",color:tab==="strategy"?C.blue:C.txD,fontFamily:font}}>Estrategia</button>
+            <button onClick={()=>setTab("creatives")} style={{flex:1,padding:"8px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab==="creatives"?C.sf:"transparent",color:tab==="creatives"?C.rose:C.txD,fontFamily:font}}>Creatividades</button>
+          </div>
+        </div>}
+        <OutSearch content={o} loading={l} label={tab==="strategy"?"Estrategia Meta Ads":"Pack Creativo Meta Ads"} phase={phase}/>
+      </div>
+    </div>
+  </div>;
+}
+
 /* ══════ DASHBOARD PREDICTIVO ══════ */
 function PredictiveDashboard(){
   const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[nm,sNm]=useState("");
@@ -1895,10 +2364,10 @@ function Home({go}){
   return <div>
     <div style={{marginBottom:28}}>
       <h2 style={{fontSize:22,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Panel de Control</h2>
-      <p style={{fontSize:14,color:C.tx,margin:0}}>Cliniq Digital - 27 herramientas | Web Search IA | Registro Actividad</p>
+      <p style={{fontSize:14,color:C.tx,margin:0}}>Cliniq Digital - 28 herramientas | Web Search IA | Registro Actividad</p>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:14,marginBottom:24}}>
-      {[{lb:"Nichos",v:"10+",cl:C.purple},{lb:"Herramientas",v:"27",cl:C.blue},{lb:"Motor IA",v:"Claude",cl:C.teal},{lb:"Plataformas",v:"18+",cl:C.green}].map(s=>
+      {[{lb:"Nichos",v:"10+",cl:C.purple},{lb:"Herramientas",v:"28",cl:C.blue},{lb:"Motor IA",v:"Claude",cl:C.teal},{lb:"Plataformas",v:"18+",cl:C.green}].map(s=>
         <div key={s.lb} style={{background:C.sf,border:"1px solid "+C.bd,borderRadius:12,padding:"16px 20px"}}>
           <div style={{fontSize:11,color:C.tx,marginBottom:6}}>{s.lb}</div>
           <div style={{fontSize:24,fontWeight:700,color:s.cl}}>{s.v}</div>
@@ -1908,7 +2377,7 @@ function Home({go}){
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:16}}>
       {[
         {t:"Producción",ids:["landing","whatsapp","seo","followup","social","video","imageprompt","gbp","webstruct"]},
-        {t:"Crecimiento",ids:["multiplier","proposal","campaign","dashboard"]},
+        {t:"Crecimiento",ids:["multiplier","proposal","campaign","metaads","dashboard"]},
         {t:"Inteligencia",ids:["audit","competitor","compliance","reviews"]},
         {t:"Presencia Digital",ids:["scan","deepanalysis","expansion","citations","reputation","voiceseo","brandmonitor","implement"]},
         {t:"Estrategia y Gestión",ids:["report","manual","clients"]}
@@ -1939,13 +2408,13 @@ export default function App(){
     clients:<Clients/>,scan:<ScanPresencia/>,expansion:<Expansion/>,citations:<CitationsAudit/>,
     reputation:<Reputation/>,voiceseo:<VoiceSeo/>,brandmonitor:<BrandMonitor/>,
     deepanalysis:<DeepAnalysis/>,implement:<ImplementHub/>,
-    multiplier:<ContentMultiplier/>,proposal:<ProposalGenerator/>,campaign:<MultiCampaign/>,dashboard:<PredictiveDashboard/>
+    multiplier:<ContentMultiplier/>,proposal:<ProposalGenerator/>,campaign:<MultiCampaign/>,metaads:<MetaAdsPro/>,dashboard:<PredictiveDashboard/>
   };
   const curLabel=ITEMS.find(i=>i.id===act)?.lb||"Panel";
 
   return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",color:C.w}}>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-    <style>{`*{margin:0;padding:0;box-sizing:border-box}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:${C.bg}}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:3px}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}.spinner{width:16px;height:16px;border:2px solid ${C.teal};border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}select option{background:${C.sf};color:${C.w}}@media(max-width:860px){.dsk{display:none!important}}`}</style>
+    <style>{`*{margin:0;padding:0;box-sizing:border-box}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:${C.bg}}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:3px}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}.spinner{width:16px;height:16px;border:2px solid ${C.teal};border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}select option{background:${C.sf};color:${C.w}}@media(max-width:860px){.dsk{display:none!important}}`}</style>
 
     <aside className="dsk" style={{width:col?54:220,background:C.sf,borderRight:"1px solid "+C.bd,display:"flex",flexDirection:"column",transition:"width 0.25s",flexShrink:0,height:"100vh",position:"sticky",top:0,overflow:"hidden"}}>
       <div style={{padding:col?"14px 6px":"14px 12px",borderBottom:"1px solid "+C.bd,display:"flex",alignItems:"center",gap:8,justifyContent:col?"center":"flex-start"}}>
@@ -1976,7 +2445,7 @@ export default function App(){
           <h1 style={{fontSize:14,fontWeight:700,color:C.w,margin:0}}>{curLabel}</h1>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:10,color:C.txD,padding:"3px 8px",background:C.sf2,borderRadius:4}}>27 herramientas</span>
+          <span style={{fontSize:10,color:C.txD,padding:"3px 8px",background:C.sf2,borderRadius:4}}>28 herramientas</span>
           <div style={{width:26,height:26,borderRadius:6,background:bg8(C.teal),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:C.teal}}>L</div>
         </div>
       </header>
