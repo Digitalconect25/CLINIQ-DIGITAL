@@ -363,11 +363,14 @@ async function streamRequest(body,setO,setL,onText){
           await new Promise(ok=>setTimeout(ok,wait*1000));
           continue;
         }
-        // Fallback: if DeepSeek fails, try Claude Haiku
-        if(body.provider==="deepseek"&&attempt===maxRetries-1){
-          setO("DeepSeek no disponible, usando Claude...");
+        // Fallback chain: groq -> deepseek -> claude haiku
+        if((body.provider==="groq"||body.provider==="deepseek")&&attempt===maxRetries-1){
+          const nextProvider=body.provider==="groq"?"deepseek":"anthropic";
+          const nextModel=body.provider==="groq"?MODELS.ds:MODELS.fast;
+          const nextLabel=body.provider==="groq"?"DeepSeek":"Claude";
+          setO(body.provider==="groq"?"Groq no disponible, usando DeepSeek...":"DeepSeek no disponible, usando Claude...");
           await new Promise(ok=>setTimeout(ok,1000));
-          return streamRequest({...body,provider:"anthropic",model:"claude-haiku-4-5-20251001"},setO,setL,onText);
+          return streamRequest({...body,provider:nextProvider,model:nextModel},setO,setL,onText);
         }
         setO("ERROR API: "+(typeof errMsg==="string"?errMsg:JSON.stringify(errMsg)));setL(false);return null;
       }
@@ -418,11 +421,13 @@ async function streamRequest(body,setO,setL,onText){
         setO(`Error de conexion, reintentando en 5s...`);
         await new Promise(ok=>setTimeout(ok,5000));continue;
       }
-      // Fallback: DeepSeek connection error -> try Claude
-      if(body.provider==="deepseek"){
-        setO("DeepSeek no disponible, usando Claude...");
+      // Fallback chain on connection error: groq -> deepseek -> claude
+      if(body.provider==="groq"||body.provider==="deepseek"){
+        const nextProvider=body.provider==="groq"?"deepseek":"anthropic";
+        const nextModel=body.provider==="groq"?MODELS.ds:MODELS.fast;
+        setO(body.provider==="groq"?"Groq no disponible, usando DeepSeek...":"DeepSeek no disponible, usando Claude...");
         await new Promise(ok=>setTimeout(ok,1000));
-        return streamRequest({...body,provider:"anthropic",model:"claude-haiku-4-5-20251001"},setO,setL,onText);
+        return streamRequest({...body,provider:nextProvider,model:nextModel},setO,setL,onText);
       }
       setO("Error de conexion: "+e.message);setL(false);return null;
     }
@@ -437,13 +442,21 @@ const MODELS={
   mid:"claude-sonnet-4-5-20250929",
   full:"claude-sonnet-4-20250514",
   ds:"deepseek-chat",
-  dsr:"deepseek-reasoner"
+  dsr:"deepseek-reasoner",
+  groqFast:"llama-3.1-8b-instant",
+  groqMid:"meta-llama/llama-4-maverick-17b-128e-instruct",
+  groqPro:"llama-3.3-70b-versatile",
+  groqQwen:"qwen/qwen3-32b"
 };
 function pickModel(toolHint){
-  const ds=["Respuesta Reseñas","Google Business","WhatsApp","Scripts Vídeo","Prompts Imagen IA","Multiplicador Contenido","Manual Comunicación","Secuencias Seguimiento","Expansión Plataformas","Auditoría NAP","SEO Voz","Monitor de Marca"];
-  const mid=["Landing Pages","Contenido SEO","Estrategia Redes","Arquitectura Web","Verificador Normativo","Reporting Mensual"];
-  if(ds.some(t=>toolHint?.includes(t))) return {model:MODELS.ds,provider:"deepseek"};
-  if(mid.some(t=>toolHint?.includes(t))) return {model:MODELS.mid,provider:"anthropic"};
+  // Tier 1 - Groq Maverick: fast + cheap ($0.20/$0.60, 562 TPS) for light tasks
+  const groqTier=["Respuesta Reseñas","Google Business","WhatsApp","Scripts Vídeo","Prompts Imagen IA","Multiplicador Contenido","Manual Comunicación","Secuencias Seguimiento","Expansión Plataformas","Auditoría NAP","SEO Voz","Monitor de Marca"];
+  // Tier 2 - Claude Sonnet 4.5: balanced quality for mid-complexity
+  const midTier=["Landing Pages","Contenido SEO","Estrategia Redes","Arquitectura Web","Verificador Normativo","Reporting Mensual"];
+  // Tier 3 - Claude Sonnet 4: max quality for complex analysis
+  // (everything else: Meta Ads, Propuestas, Campañas, Dashboard, Auditorías, Deep Analysis, aiSearch)
+  if(groqTier.some(t=>toolHint?.includes(t))) return {model:MODELS.groqMid,provider:"groq"};
+  if(midTier.some(t=>toolHint?.includes(t))) return {model:MODELS.mid,provider:"anthropic"};
   return {model:MODELS.full,provider:"anthropic"};
 }
 
