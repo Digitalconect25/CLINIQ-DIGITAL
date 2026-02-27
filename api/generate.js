@@ -1,5 +1,6 @@
 export const config = {
   maxDuration: 60,
+  supportsResponseStreaming: true,
 };
 
 export default async function handler(req, res) {
@@ -12,18 +13,18 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured on server' });
 
+  const body = req.body;
+  const useStream = body.stream === true;
+
   try {
-    const body = req.body;
     const anthropicBody = {
       model: body.model || 'claude-sonnet-4-20250514',
       max_tokens: body.max_tokens || 4096,
       system: body.system || '',
       messages: body.messages || [],
+      stream: useStream,
     };
     if (body.tools) anthropicBody.tools = body.tools;
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 55000);
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -33,26 +34,55 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(anthropicBody),
-      signal: controller.signal,
     });
 
-    clearTimeout(timeout);
+    if (useStream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
 
-    const text = await response.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (e) {
-      console.error('Anthropic returned non-JSON:', text.slice(0, 500));
-      return res.status(502).json({ error: 'Respuesta no valida de Anthropic: ' + text.slice(0, 200) });
+      if (!response.ok) {
+        const errText = await response.text();
+        let errMsg;
+        try { errMsg = JSON.parse(errText).error?.message || errText.slice(0, 200); } catch(e) { errMsg = errText.slice(0, 200); }
+        res.write(`data: ${JSON.stringify({ type: 'error', error: errMsg })}\n\n`);
+        res.end();
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          res.write(chunk);
+        }
+      } catch (streamErr) {
+        console.error('Stream error:', streamErr);
+      }
+      res.end();
+    } else {
+      const text = await response.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        return res.status(502).json({ error: 'Respuesta no valida de Anthropic: ' + text.slice(0, 200) });
+      }
+      return res.status(response.status).json(data);
     }
-
-    return res.status(response.status).json(data);
   } catch (error) {
-    if (error.name === 'AbortError') {
-      return res.status(504).json({ error: 'La solicitud tardo demasiado. Intenta con un prompt mas corto o reduce max_tokens.' });
-    }
     console.error('Anthropic proxy error:', error);
-    return res.status(500).json({ error: error.message || 'Internal server error' });
+    if (useStream) {
+      try {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+        res.end();
+      } catch(e) { res.end(); }
+    } else {
+      return res.status(500).json({ error: error.message || 'Internal server error' });
+    }
   }
 }
