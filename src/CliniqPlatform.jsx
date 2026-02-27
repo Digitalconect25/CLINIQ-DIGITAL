@@ -139,6 +139,11 @@ const MENU = [
   {id:"voiceseo",ic:"◉",lb:"SEO Voz / Asistentes",cl:C.purple},
   {id:"brandmonitor",ic:"◎",lb:"Monitor de Marca",cl:C.orange},
   {id:"implement",ic:"◧",lb:"Hub Implementación",cl:C.rose},
+  {g:"CRECIMIENTO"},
+  {id:"multiplier",ic:"⊛",lb:"Multiplicador Contenido",cl:C.cyan},
+  {id:"proposal",ic:"◰",lb:"Propuestas Comerciales",cl:C.gold},
+  {id:"campaign",ic:"⊕",lb:"Campañas Multicanal",cl:C.rose},
+  {id:"dashboard",ic:"◫",lb:"Dashboard Predictivo",cl:C.green},
   {g:"ESTRATEGIA"},
   {id:"report",ic:"◰",lb:"Reporting Mensual",cl:C.teal},
   {id:"manual",ic:"◳",lb:"Manual Comunicación",cl:C.gold},
@@ -1335,15 +1340,561 @@ function Clients(){
   </div>;
 }
 
+/* ══════ MULTIPLICADOR DE CONTENIDO ══════ */
+function ContentMultiplier(){
+  const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[nm,sNm]=useState("");
+  const[ci,sCi]=useState("");const[pv,sPv]=useState("");const[br,sBr]=useState("");
+  const[src,setSrc]=useState("");const[srcType,setSrcType]=useState("Texto libre");
+  const[o,sO]=useState("");const[l,sL]=useState(false);
+  const[chTab,setChTab]=useState("all");
+  const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
+  const channels=["Instagram Post","Instagram Reels","TikTok","Blog SEO","Email Marketing","WhatsApp","Google Business Post","LinkedIn"];
+
+  const parseChannels=(text)=>{
+    const sections={};let current="all";
+    text.split("\n").forEach(line=>{
+      const found=channels.find(ch=>line.toUpperCase().includes(ch.toUpperCase()));
+      if(found&&(line.startsWith("=")||line.startsWith("-")||line.startsWith("#")||line.includes("---")||line.match(/^\d+[\.\)]/)||line.toUpperCase().startsWith(found.toUpperCase()))){
+        current=found;sections[current]=(sections[current]||"")+"\n";
+      }
+      sections[current]=(sections[current]||"")+line+"\n";
+    });
+    return sections;
+  };
+
+  const filtered=o?chTab==="all"?o:(() => {const s=parseChannels(o);return s[chTab]||"No se encontro contenido para este canal. Genera de nuevo.";})():"";
+
+  return <div>
+    <div style={{marginBottom:20}}>
+      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Multiplicador de Contenido IA</h3>
+      <p style={{fontSize:13,color:C.tx,margin:0}}>1 texto origen = 8 versiones optimizadas para cada canal</p>
+    </div>
+    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
+      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
+          <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
+          <Fld label="Tipo de contenido origen"><Sel value={srcType} onChange={setSrcType} opts={["Texto libre","Artículo blog","Descripción servicio","Noticia/novedad","Caso de éxito","Oferta/promoción","Evento","FAQ / Pregunta frecuente"]}/></Fld>
+          <Fld label="Contenido origen *"><Txa value={src} onChange={setSrc} ph="Pega aqui el texto base, describe el tema o escribe la idea principal. La IA lo adaptara a 8 canales diferentes con formato, tono y longitud optimizados para cada uno..." rows={8}/></Fld>
+          <Btn primary disabled={!src||!ni} color={C.cyan} onClick={()=>{
+            setChTab("all");
+            ai("Eres un equipo completo de content marketing. Tu trabajo: tomar UN contenido origen y transformarlo en 8 piezas COMPLETAMENTE DIFERENTES, cada una optimizada para su canal. NO copies el mismo texto con ligeras variaciones, ADAPTA profundamente: formato, tono, longitud, estructura, gancho, CTA. Cada pieza debe parecer creada nativamente para ese canal por un especialista.",
+            `CONTENIDO ORIGEN (${srcType}):
+"""
+${src}
+"""
+
+Centro: ${nm||"[Nombre]"}. Sector: ${nR}. Localizacion: ${geo}.
+
+GENERA 8 VERSIONES COMPLETAS LISTAS PARA PUBLICAR:
+
+========================================
+1. INSTAGRAM POST (Carrusel / Imagen)
+========================================
+- Caption completo (max 2200 caracteres) con gancho en primera linea
+- Estructura: gancho > problema > solucion > CTA > hashtags
+- 15 hashtags estrategicos (5 generales + 5 nicho + 5 locales)
+- Texto sugerido para cada slide si es carrusel (5-7 slides)
+- Mejor hora publicacion y dia de la semana
+
+========================================
+2. INSTAGRAM REELS (Script 30-60s)
+========================================
+- Gancho primeros 3 segundos (lo mas importante)
+- Script palabra por palabra con marcas de tiempo
+- Texto en pantalla por escena
+- Audio sugerido / trending sound
+- CTA hablado + texto en pantalla
+- Caption para el reel
+
+========================================
+3. TIKTOK (Script 15-45s)
+========================================
+- Gancho viral (patron de TikTok: "POV:", "Esto no te lo dicen...", "Lo que nadie te cuenta...")
+- Script conversacional en primera persona
+- Transiciones sugeridas
+- Texto overlay por escena
+- Trending hashtags TikTok
+- Formato nativo TikTok (no reciclaje de Instagram)
+
+========================================
+4. BLOG SEO (Articulo completo)
+========================================
+- Title tag optimizado (max 60 chars, con keyword + ciudad)
+- Meta description (max 155 chars)
+- H1 + estructura H2/H3
+- Articulo de 600-800 palabras con keyword density 1-2%
+- FAQ con 3 preguntas (schema FAQ)
+- CTA interno + enlaces sugeridos
+- Keywords secundarias integradas
+
+========================================
+5. EMAIL MARKETING
+========================================
+- Subject line (3 opciones con distinto enfoque)
+- Preview text
+- Cuerpo del email completo (estructura: gancho > valor > CTA)
+- Version texto plano
+- Segmento recomendado
+- Mejor dia/hora envio
+- Metricas objetivo (open rate, CTR)
+
+========================================
+6. WHATSAPP BUSINESS
+========================================
+- Mensaje principal (max 160 palabras, tono conversacional)
+- Variante con enlace
+- Variante con pregunta para engagement
+- Lista de difusion vs grupo: recomendacion
+- Cumplimiento LOPD/RGPD
+- Timing recomendado
+
+========================================
+7. GOOGLE BUSINESS POST
+========================================
+- Tipo: Novedad / Oferta / Evento (el mas apropiado)
+- Texto optimizado (max 1500 chars, primeros 100 visibles)
+- CTA de Google (Reservar, Mas info, Llamar, etc.)
+- Keywords locales integradas
+- Imagen sugerida (descripcion)
+- Frecuencia publicacion recomendada
+
+========================================
+8. LINKEDIN
+========================================
+- Post profesional (tono B2B, autoridad, datos)
+- Gancho primera linea (visible sin "ver mas")
+- Estructura: insight > desarrollo > conclusion > pregunta engagement
+- Sin hashtags excesivos (max 5)
+- Mencion a tendencia del sector si aplica
+- Mejor hora publicacion
+
+========================================
+RESUMEN CALENDARIO
+========================================
+- Orden recomendado de publicacion (que va primero)
+- Calendario semanal sugerido
+- Notas de adaptacion entre canales`,sO,sL,nR,geo,
+            {tool:"Multiplicador Contenido",client:nm||"Sin asignar",inputs:{tipo:srcType,origen:src.slice(0,80)}});
+          }}>Multiplicar a 8 Canales</Btn>
+        </div>
+      </Crd></div>
+      <div style={{flex:1,minWidth:300}}>
+        {o&&<div style={{marginBottom:12}}>
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",background:C.sf2,borderRadius:8,padding:4}}>
+            <button onClick={()=>setChTab("all")} style={{padding:"6px 12px",borderRadius:6,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:chTab==="all"?C.sf:"transparent",color:chTab==="all"?C.w:C.txD,fontFamily:font}}>Todo</button>
+            {channels.map(ch=><button key={ch} onClick={()=>setChTab(ch)} style={{padding:"6px 10px",borderRadius:6,border:"none",fontSize:10,fontWeight:600,cursor:"pointer",background:chTab===ch?C.sf:"transparent",color:chTab===ch?C.cyan:C.txD,fontFamily:font,whiteSpace:"nowrap"}}>{ch.replace("Instagram ","IG ").replace("Email Marketing","Email").replace("Google Business Post","GBP")}</button>)}
+          </div>
+        </div>}
+        <Out content={filtered} loading={l} label="Contenido Multiplicado"/>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ══════ GENERADOR DE PROPUESTAS COMERCIALES ══════ */
+function ProposalGenerator(){
+  const[ni,sNi]=useState("");const[cni,sCni]=useState("");
+  const[nm,sNm]=useState("");const[ci,sCi]=useState("");const[pv,sPv]=useState("");const[br,sBr]=useState("");
+  const[web,sWeb]=useState("");const[contacto,sContacto]=useState("");
+  const[plan,setPlan]=useState("Profesional");const[obj,sObj]=useState("");
+  const[comp,sComp]=useState("");const[notas,sNotas]=useState("");
+  const[o,sO]=useState("");const[l,sL]=useState(false);
+  const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
+
+  const printProposal=(content,clientName)=>{
+    const today=new Date().toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"});
+    let html=`<html><head><title>Propuesta - ${clientName}</title><style>
+      @page{margin:30mm 25mm}
+      body{font-family:'Segoe UI',Helvetica,sans-serif;color:#1a1a2e;line-height:1.7;font-size:13px;max-width:850px;margin:auto;padding:40px 50px}
+      .cover{text-align:center;padding:80px 0 60px;border-bottom:3px solid #2DD4BF;margin-bottom:40px;page-break-after:always}
+      .cover h1{font-size:28px;color:#2DD4BF;margin:0 0 8px;letter-spacing:-0.5px}
+      .cover h2{font-size:18px;color:#1a1a2e;font-weight:400;margin:0 0 30px}
+      .cover .meta{font-size:13px;color:#666;margin-top:40px}
+      .cover .logo{font-size:32px;font-weight:800;color:#2DD4BF;margin-bottom:20px}
+      h2{font-size:16px;color:#2DD4BF;border-bottom:1px solid #e0e0e0;padding-bottom:6px;margin:30px 0 12px}
+      h3{font-size:14px;color:#1a1a2e;margin:20px 0 8px}
+      .highlight{background:#f0faf8;border-left:3px solid #2DD4BF;padding:12px 16px;margin:12px 0;border-radius:0 6px 6px 0}
+      .price-box{background:#1a1a2e;color:white;padding:20px 24px;border-radius:10px;margin:16px 0;text-align:center}
+      .price-box .amount{font-size:36px;font-weight:800;color:#2DD4BF}
+      .price-box .period{font-size:13px;color:#94A3B8}
+      .roi-box{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0}
+      .roi-item{flex:1;min-width:150px;background:#f8f8fc;border:1px solid #e8e8f0;border-radius:8px;padding:16px;text-align:center}
+      .roi-val{font-size:22px;font-weight:700;color:#2DD4BF}
+      .roi-lbl{font-size:11px;color:#888;margin-top:4px}
+      .timeline{border-left:2px solid #2DD4BF;padding-left:20px;margin:16px 0}
+      .timeline-item{margin-bottom:16px;position:relative}
+      .timeline-item::before{content:'';width:10px;height:10px;background:#2DD4BF;border-radius:50%;position:absolute;left:-25px;top:5px}
+      .footer{margin-top:40px;padding-top:16px;border-top:2px solid #e0e0e0;font-size:11px;color:#999;text-align:center}
+      table{width:100%;border-collapse:collapse;margin:12px 0}
+      th{background:#f0faf8;color:#1a1a2e;padding:8px 12px;text-align:left;font-size:12px;border-bottom:2px solid #2DD4BF}
+      td{padding:8px 12px;border-bottom:1px solid #eee;font-size:12px}
+      @media print{body{padding:0}.cover{padding:60px 0 40px}}
+    </style></head><body>`;
+    html+=`<div class="cover">
+      <div class="logo">CLINIQ DIGITAL</div>
+      <h1>Propuesta de Servicios</h1>
+      <h2>${clientName||"[Cliente]"}</h2>
+      <div class="meta">${today}<br>${geo}<br>Plan ${plan}</div>
+    </div>`;
+    html+=`<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7">${content.replace(/</g,"&lt;")}</pre>`;
+    html+=`<div class="footer">Cliniq Digital | Propuesta confidencial | ${today}<br>Este documento es valido durante 30 dias desde su fecha de emision.</div>`;
+    html+=`<script>setTimeout(()=>window.print(),600)<\/script></body></html>`;
+    const w=window.open("","_blank");w.document.write(html);
+  };
+
+  return <div>
+    <div style={{marginBottom:20}}>
+      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Generador de Propuestas Comerciales</h3>
+      <p style={{fontSize:13,color:C.tx,margin:0}}>Propuestas profesionales con estrategia, precios y ROI para cerrar clientes</p>
+    </div>
+    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
+      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <Fld label="Nombre negocio *"><Inp value={nm} onChange={sNm} ph="Clinica Dental Sonrisa"/></Fld>
+          <Fld label="Persona de contacto"><Inp value={contacto} onChange={sContacto} ph="Dra. Maria Lopez"/></Fld>
+          <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
+          <Fld label="Web actual"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
+          <Fld label="Plan propuesto"><Sel value={plan} onChange={setPlan} opts={PLANS.map(p=>({value:p.lb,label:`${p.lb} - ${p.price} EUR/mes - ${p.desc}`}))}/></Fld>
+          <Fld label="Objetivo principal"><Sel value={obj} onChange={sObj} opts={["Captar más pacientes/clientes","Mejorar presencia digital","Lanzar nuevo servicio","Recuperar pacientes perdidos","Posicionar como referente en la zona","Competir contra franquicias","Abrir nueva ubicación"]} ph="Seleccionar..."/></Fld>
+          <Fld label="Competencia conocida"><Inp value={comp} onChange={sComp} ph="Nombres de competidores directos"/></Fld>
+          <Fld label="Notas adicionales"><Txa value={notas} onChange={sNotas} ph="Contexto del cliente, objeciones, puntos clave..." rows={3}/></Fld>
+          <Btn primary disabled={!nm||!ni||!ci} color={C.gold} onClick={()=>
+            ai("Eres un director comercial de una agencia de marketing digital premium. Genera propuestas comerciales que CIERRAN VENTAS. La propuesta debe ser profesional, persuasiva, basada en datos realisticos del sector y la zona, con ROI estimado conservador y creible. NO uses promesas vacias ni marketing agresivo. Cada numero debe ser realista y justificable.",
+            `PROPUESTA COMERCIAL COMPLETA para: "${nm}"
+Contacto: ${contacto||"[Responsable]"}. Sector: ${nR}. Localizacion: ${geo}. Web: ${web||"Sin web"}. Plan: ${plan} (${PLANS.find(p=>p.lb===plan)?.price||"497"} EUR/mes). Objetivo: ${obj||"Captar nuevos clientes"}. Competencia: ${comp||"No especificada"}. Notas: ${notas||"Ninguna"}.
+
+GENERA PROPUESTA PROFESIONAL COMPLETA:
+
+1. RESUMEN EJECUTIVO
+- Situacion actual detectada (basada en lo que sabemos)
+- Oportunidad de mercado en ${geo} para ${nR}
+- Propuesta de valor en 3 lineas
+
+2. DIAGNOSTICO INICIAL
+- Estado presencia digital estimada
+- Gaps principales detectados
+- Comparativa con competencia local
+- Potencial desaprovechado
+
+3. ESTRATEGIA PROPUESTA
+- Objetivos SMART a 3, 6 y 12 meses
+- Lineas de accion principales
+- Canales prioritarios y por que
+- Diferenciacion vs competencia
+
+4. PLAN DE SERVICIOS INCLUIDOS
+Detalla EXACTAMENTE que incluye el plan ${plan}:
+- Servicios mensuales con descripcion y frecuencia
+- Entregables concretos (que recibe el cliente cada mes)
+- Herramientas y plataformas que se gestionan
+- Reuniones y reporting
+
+5. TIMELINE DE IMPLEMENTACION
+- Mes 1: Setup y fundamentos (detalla)
+- Mes 2-3: Activacion y crecimiento (detalla)
+- Mes 4-6: Optimizacion y escalado (detalla)
+- Mes 7-12: Consolidacion y expansión (detalla)
+
+6. PROYECCION DE RESULTADOS (ROI)
+ESTIMACIONES CONSERVADORAS Y REALISTAS para ${nR} en ${geo}:
+- Visitas web: actual estimado vs proyeccion 6 y 12 meses
+- Posicionamiento SEO: keywords objetivo y posiciones esperadas
+- Google Maps: visibilidad y acciones esperadas
+- Consultas/leads mensuales: proyeccion realista
+- Tasa conversion consulta-a-paciente del sector
+- Facturacion adicional estimada (ticket medio del sector x conversiones)
+- ROI: inversion vs retorno estimado
+- IMPORTANTE: usa datos del sector en Espana, no inventes cifras infladas
+
+7. INVERSION
+- Precio mensual: ${PLANS.find(p=>p.lb===plan)?.price||"497"} EUR + IVA
+- Setup inicial si aplica
+- Compromiso minimo recomendado (y por que)
+- Comparativa con coste de un empleado dedicado
+- Comparativa con coste de captacion por Google Ads
+
+8. GARANTIAS Y DIFERENCIADORES
+- Que nos diferencia de otras agencias
+- Compromiso de transparencia y reporting
+- Sin permanencia forzada (la calidad retiene)
+- Equipo especializado en ${nR}
+
+9. SIGUIENTE PASO
+- CTA claro: que debe hacer el cliente ahora
+- Proceso de onboarding resumido
+- Disponibilidad para reunion
+
+10. CONDICIONES
+- Forma de pago, facturacion, plazos
+- Que necesitamos del cliente para empezar
+- Validez de la propuesta (30 dias)`,sO,sL,nR,geo,
+            {tool:"Propuestas Comerciales",client:nm,inputs:{plan:plan,objetivo:obj}})
+          }>Generar Propuesta</Btn>
+          {o&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
+            <Btn small primary color={C.gold} onClick={()=>printProposal(o,nm)}>Imprimir / PDF</Btn>
+            <Btn small onClick={()=>navigator.clipboard.writeText(o)}>Copiar texto</Btn>
+          </div>}
+        </div>
+      </Crd></div>
+      <div style={{flex:1,minWidth:300}}><Out content={o} loading={l} label="Propuesta Comercial"/></div>
+    </div>
+  </div>;
+}
+
+/* ══════ CAMPAÑAS MULTICANAL ══════ */
+function MultiCampaign(){
+  const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[nm,sNm]=useState("");
+  const[ci,sCi]=useState("");const[pv,sPv]=useState("");const[br,sBr]=useState("");
+  const[obj,sObj]=useState("Lanzar servicio/tratamiento nuevo");
+  const[srv,sSrv]=useState("");const[dur,sDur]=useState("4 semanas");
+  const[budget,sBudget]=useState("300-500 EUR");const[notas,sNotas]=useState("");
+  const[o,sO]=useState("");const[l,sL]=useState(false);
+  const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
+
+  return <div>
+    <div style={{marginBottom:20}}>
+      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Campañas Multicanal</h3>
+      <p style={{fontSize:13,color:C.tx,margin:0}}>1 brief = campaña coordinada completa en todos los canales</p>
+    </div>
+    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
+      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
+          <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
+          <Fld label="Objetivo de la campaña"><Sel value={obj} onChange={sObj} opts={["Lanzar servicio/tratamiento nuevo","Promoción estacional (Navidad, verano, vuelta cole...)","Captar primeras consultas","Evento jornada de puertas abiertas","Reactivar pacientes inactivos","Black Friday / oferta limitada","Posicionar como referente","Inauguración / nueva apertura"]}/></Fld>
+          <Fld label="Servicio o tema central *"><Inp value={srv} onChange={sSrv} ph="Ej: Blanqueamiento dental, Botox, nuevo equipo laser..."/></Fld>
+          <Fld label="Duración"><Sel value={dur} onChange={sDur} opts={["1 semana (flash)","2 semanas","4 semanas","6 semanas","8 semanas"]}/></Fld>
+          <Fld label="Presupuesto ads (opcional)"><Sel value={budget} onChange={sBudget} opts={["Sin inversión en ads","100-300 EUR","300-500 EUR","500-1000 EUR","1000-2000 EUR","+2000 EUR"]}/></Fld>
+          <Fld label="Contexto adicional"><Txa value={notas} onChange={sNotas} ph="Detalles especificos: oferta concreta, fecha evento, profesional destacado..." rows={3}/></Fld>
+          <Btn primary disabled={!srv||!ni||!nm} color={C.rose} onClick={()=>
+            ai("Eres un director de campanas multicanal para negocios locales. Generas campanas COORDINADAS donde cada canal refuerza a los demas con mensajes consistentes pero adaptados. No son piezas sueltas, es una orquestacion estrategica con timing preciso.",
+            `CAMPAÑA MULTICANAL COMPLETA
+Centro: "${nm}". Sector: ${nR}. Localizacion: ${geo}.
+Objetivo: ${obj}. Servicio/tema: "${srv}". Duracion: ${dur}. Presupuesto ads: ${budget}. Notas: ${notas||"Ninguna"}.
+
+GENERA CAMPAÑA COORDINADA:
+
+1. BRIEF ESTRATEGICO
+- Concepto creativo central (naming campaña, claim, visual key)
+- Mensaje principal (1 frase)
+- Publico objetivo primario y secundario
+- Propuesta de valor diferencial
+- Tono y estilo visual
+
+2. ARQUITECTURA DE CAMPAÑA
+- Fases: Teaser > Lanzamiento > Sostenimiento > Cierre/Urgencia
+- Calendario visual semana a semana
+- Que canal activa en que fase y por que
+
+3. PRE-LANZAMIENTO (Teaser)
+- Stories/reels de anticipacion (scripts completos)
+- Email de avance a base de datos
+- WhatsApp a pacientes/clientes VIP
+- Timing exacto
+
+4. LANZAMIENTO
+- Post principal Instagram (copy completo + hashtags)
+- Reel/TikTok de lanzamiento (script + texto pantalla)
+- Google Business Post
+- Email de lanzamiento (subject + body)
+- WhatsApp difusion
+- Stories secuencia (5 stories con contenido cada una)
+- LinkedIn si B2B
+
+5. SOSTENIMIENTO (contenido semanal)
+Calendario dia a dia con contenido COMPLETO para cada publicacion:
+- Lunes: [canal + pieza + copy completo]
+- Martes: [canal + pieza + copy completo]
+- Miercoles: [canal + pieza + copy completo]
+- Jueves: [canal + pieza + copy completo]
+- Viernes: [canal + pieza + copy completo]
+- Sabado/Domingo: [si aplica]
+Repetir para cada semana de la campaña.
+
+6. FASE URGENCIA / CIERRE
+- Countdown en stories
+- Email de ultima oportunidad
+- WhatsApp de cierre
+- Post recordatorio
+
+7. PAID MEDIA (si presupuesto > 0)
+${budget!=="Sin inversión en ads"?`- Distribucion presupuesto ${budget} por canal y fase
+- Segmentacion de audiencias (edad, zona ${geo}, intereses)
+- Formatos de anuncio recomendados
+- Copy de anuncios (3 variantes)
+- Metricas objetivo por canal (CPL, CPA, CTR)
+- Remarketing estrategia`:"- Campaña 100% organica: maximizar alcance sin inversion"}
+
+8. CONTENIDO VISUAL (briefing)
+- Key visual: descripcion detallada para diseno o IA
+- Paleta de colores sugerida
+- Tipografias recomendadas
+- Plantillas necesarias (stories, posts, banners)
+- Prompts de IA para generar imagenes principales
+
+9. MEDICION Y KPIs
+- KPIs por canal con objetivos numericos realistas
+- Dashboard de seguimiento semanal
+- Checklist de optimizacion mid-campaign
+- Criterios para ajustar en tiempo real
+
+10. POST-CAMPAÑA
+- Que hacer con los leads generados
+- Secuencia de seguimiento post-campaña
+- Analisis de resultados (plantilla)
+- Aprendizajes para proxima campaña`,sO,sL,nR,geo,
+            {tool:"Campañas Multicanal",client:nm,inputs:{objetivo:obj,servicio:srv,duracion:dur}})
+          }>Generar Campaña Completa</Btn>
+        </div>
+      </Crd></div>
+      <div style={{flex:1,minWidth:300}}><Out content={o} loading={l} label="Campaña Multicanal"/></div>
+    </div>
+  </div>;
+}
+
+/* ══════ DASHBOARD PREDICTIVO ══════ */
+function PredictiveDashboard(){
+  const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[nm,sNm]=useState("");
+  const[ci,sCi]=useState("");
+  /* Metricas actuales */
+  const[visitas,sVisitas]=useState("");const[leads,sLeads]=useState("");const[conv,sConv]=useState("");
+  const[ticket,sTicket]=useState("");const[resenas,sResenas]=useState("");const[nota,sNota]=useState("");
+  const[seguidores,sSeguidores]=useState("");const[engagement,sEngagement]=useState("");
+  const[kwPos,sKwPos]=useState("");const[gbpViews,sGbpViews]=useState("");
+  const[inversionAds,sInversionAds]=useState("");const[mesesActivo,sMesesActivo]=useState("3 meses");
+  const[o,sO]=useState("");const[l,sL]=useState(false);const[phase,setPhase]=useState(null);
+  const[tab,setTab]=useState("projections");
+  const nR=resolveNiche(ni,cni);
+
+  /* Simple metric parser */
+  const metrics=[
+    {lb:"Visitas/mes",v:visitas,cl:C.blue},
+    {lb:"Leads/mes",v:leads,cl:C.teal},
+    {lb:"Conversiones/mes",v:conv,cl:C.green},
+    {lb:"Ticket medio",v:ticket?ticket+"€":"",cl:C.gold},
+    {lb:"Reseñas",v:resenas,cl:C.purple},
+    {lb:"Nota media",v:nota,cl:nota&&parseFloat(nota)>=4.5?C.green:nota&&parseFloat(nota)>=4?C.gold:C.rose},
+    {lb:"Seguidores",v:seguidores,cl:C.cyan},
+    {lb:"GBP vistas",v:gbpViews,cl:C.orange},
+  ].filter(m=>m.v);
+
+  return <div>
+    <div style={{marginBottom:20}}>
+      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Dashboard Predictivo</h3>
+      <p style={{fontSize:13,color:C.tx,margin:0}}>Métricas actuales + proyección IA a 3, 6 y 12 meses</p>
+    </div>
+
+    {metrics.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:20}}>
+      {metrics.map(m=><div key={m.lb} style={{background:C.sf,border:"1px solid "+C.bd,borderRadius:10,padding:"12px 16px",borderTop:"2px solid "+m.cl}}>
+        <div style={{fontSize:10,color:C.tx,marginBottom:4}}>{m.lb}</div>
+        <div style={{fontSize:20,fontWeight:700,color:m.cl}}>{m.v}</div>
+      </div>)}
+    </div>}
+
+    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
+      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
+          <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
+          <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
+          <Fld label="Meses activo con marketing digital"><Sel value={mesesActivo} onChange={sMesesActivo} opts={["Empezando (0 meses)","1-2 meses","3 meses","6 meses","12 meses","+12 meses"]}/></Fld>
+          <div style={{fontSize:11,fontWeight:600,color:C.teal,letterSpacing:0.5,textTransform:"uppercase",marginTop:4}}>Metricas actuales</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Fld label="Visitas web/mes"><Inp value={visitas} onChange={sVisitas} ph="Ej: 1200"/></Fld>
+            <Fld label="Leads/consultas mes"><Inp value={leads} onChange={sLeads} ph="Ej: 45"/></Fld>
+            <Fld label="Conversiones/mes"><Inp value={conv} onChange={sConv} ph="Ej: 12"/></Fld>
+            <Fld label="Ticket medio (EUR)"><Inp value={ticket} onChange={sTicket} ph="Ej: 350"/></Fld>
+            <Fld label="Reseñas Google (total)"><Inp value={resenas} onChange={sResenas} ph="Ej: 87"/></Fld>
+            <Fld label="Nota media Google"><Inp value={nota} onChange={sNota} ph="Ej: 4.6"/></Fld>
+            <Fld label="Seguidores RRSS"><Inp value={seguidores} onChange={sSeguidores} ph="Ej: 2300"/></Fld>
+            <Fld label="Vistas GBP/mes"><Inp value={gbpViews} onChange={sGbpViews} ph="Ej: 5400"/></Fld>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <Fld label="Posiciones SEO clave"><Inp value={kwPos} onChange={sKwPos} ph="kw1 #pos, kw2 #pos"/></Fld>
+            <Fld label="Inversión ads/mes"><Inp value={inversionAds} onChange={sInversionAds} ph="Ej: 500"/></Fld>
+          </div>
+          <Btn primary disabled={!nm||!ni||!ci} color={C.green} onClick={()=>{
+            setTab("projections");
+            aiSearch("Eres un analista de datos de marketing digital para negocios locales. Generas PROYECCIONES REALISTAS basadas en benchmarks del sector en Espana. Busca datos reales del sector para fundamentar las estimaciones. NUNCA infles numeros. Usa rangos conservadores. Si no hay datos suficientes, usa marcadores [COMPLETAR CON DATO REAL]. Responde en espanol de Espana.",
+            `DASHBOARD PREDICTIVO para: "${nm}" en ${ci}. Sector: ${nR}. Meses con marketing digital: ${mesesActivo}.
+
+METRICAS ACTUALES PROPORCIONADAS:
+- Visitas web/mes: ${visitas||"No proporcionado"}
+- Leads/consultas mes: ${leads||"No proporcionado"}
+- Conversiones/mes: ${conv||"No proporcionado"}
+- Ticket medio: ${ticket?ticket+" EUR":"No proporcionado"}
+- Resenas Google: ${resenas||"No proporcionado"} (nota: ${nota||"?"})
+- Seguidores RRSS: ${seguidores||"No proporcionado"}
+- Vistas GBP/mes: ${gbpViews||"No proporcionado"}
+- Posiciones SEO: ${kwPos||"No proporcionado"}
+- Inversion ads: ${inversionAds?inversionAds+" EUR/mes":"Sin inversion"}
+
+BUSCA: benchmarks del sector ${nR} en Espana, tasas de conversion tipicas, ticket medio del sector, crecimiento organico esperado.
+
+GENERA:
+
+1. ANALISIS ESTADO ACTUAL
+- Evaluacion de cada metrica vs benchmark del sector
+- Puntuacion global /100
+- Fortalezas y debilidades principales
+- Comparativa con competencia tipica en ${ci}
+
+2. PROYECCION A 3 MESES (Escenario conservador)
+Tabla con: Metrica | Actual | Proyeccion 3m | Variacion %
+Para cada metrica proporcionada, proyectar crecimiento realista.
+Calcular: ingresos adicionales estimados = nuevas conversiones x ticket medio
+
+3. PROYECCION A 6 MESES
+Misma tabla. Incluir efecto acumulativo del SEO (el SEO tarda 3-6 meses en dar resultados completos).
+Calcular: ROI acumulado
+
+4. PROYECCION A 12 MESES
+Misma tabla. Incluir madurez de canales.
+Calcular: ROI anual y facturacion adicional estimada
+
+5. ALERTAS Y RIESGOS
+- Señales de alarma a vigilar
+- Cuellos de botella probables
+- Dependencias criticas
+- Plan B si los resultados no llegan
+
+6. QUICK WINS (Impacto inmediato)
+- 5 acciones que pueden dar resultados en menos de 30 dias
+- Cada una con: accion concreta, impacto estimado, esfuerzo requerido
+
+7. RECOMENDACIONES ESTRATEGICAS
+- Donde invertir mas recursos y por que
+- Canales a priorizar segun datos
+- Contenido que mejor funciona en ${nR}
+- Momentos clave del año para ${nR} (estacionalidad)
+
+8. SCORECARD MENSUAL
+- Plantilla de KPIs a seguir cada mes
+- Valores objetivo para cada metrica
+- Sistema de semaforo (verde/amarillo/rojo)
+- Frecuencia de revision recomendada`,sO,sL,nR,ci||"Espana",setPhase,
+            {tool:"Dashboard Predictivo",client:nm,inputs:{visitas:visitas,leads:leads,conv:conv}});
+          }}>Generar Proyección con IA</Btn>
+        </div>
+      </Crd></div>
+      <div style={{flex:1,minWidth:300}}><OutSearch content={o} loading={l} label="Dashboard Predictivo" phase={phase}/></div>
+    </div>
+  </div>;
+}
+
 /* ══════ HOME ══════ */
 function Home({go}){
   return <div>
     <div style={{marginBottom:28}}>
       <h2 style={{fontSize:22,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Panel de Control</h2>
-      <p style={{fontSize:14,color:C.tx,margin:0}}>Cliniq Digital - 23 herramientas | Web Search IA | Registro Actividad</p>
+      <p style={{fontSize:14,color:C.tx,margin:0}}>Cliniq Digital - 27 herramientas | Web Search IA | Registro Actividad</p>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:14,marginBottom:24}}>
-      {[{lb:"Nichos",v:"10+",cl:C.purple},{lb:"Herramientas",v:"23",cl:C.blue},{lb:"Motor IA",v:"Claude",cl:C.teal},{lb:"Plataformas",v:"18+",cl:C.green}].map(s=>
+      {[{lb:"Nichos",v:"10+",cl:C.purple},{lb:"Herramientas",v:"27",cl:C.blue},{lb:"Motor IA",v:"Claude",cl:C.teal},{lb:"Plataformas",v:"18+",cl:C.green}].map(s=>
         <div key={s.lb} style={{background:C.sf,border:"1px solid "+C.bd,borderRadius:12,padding:"16px 20px"}}>
           <div style={{fontSize:11,color:C.tx,marginBottom:6}}>{s.lb}</div>
           <div style={{fontSize:24,fontWeight:700,color:s.cl}}>{s.v}</div>
@@ -1353,6 +1904,7 @@ function Home({go}){
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:16}}>
       {[
         {t:"Producción",ids:["landing","whatsapp","seo","followup","social","video","imageprompt","gbp","webstruct"]},
+        {t:"Crecimiento",ids:["multiplier","proposal","campaign","dashboard"]},
         {t:"Inteligencia",ids:["audit","competitor","compliance","reviews"]},
         {t:"Presencia Digital",ids:["scan","deepanalysis","expansion","citations","reputation","voiceseo","brandmonitor","implement"]},
         {t:"Estrategia y Gestión",ids:["report","manual","clients"]}
@@ -1382,7 +1934,8 @@ export default function App(){
     competitor:<Competitor/>,compliance:<Compliance/>,reviews:<Reviews/>,report:<Report/>,manual:<Manual/>,
     clients:<Clients/>,scan:<ScanPresencia/>,expansion:<Expansion/>,citations:<CitationsAudit/>,
     reputation:<Reputation/>,voiceseo:<VoiceSeo/>,brandmonitor:<BrandMonitor/>,
-    deepanalysis:<DeepAnalysis/>,implement:<ImplementHub/>
+    deepanalysis:<DeepAnalysis/>,implement:<ImplementHub/>,
+    multiplier:<ContentMultiplier/>,proposal:<ProposalGenerator/>,campaign:<MultiCampaign/>,dashboard:<PredictiveDashboard/>
   };
   const curLabel=ITEMS.find(i=>i.id===act)?.lb||"Panel";
 
@@ -1419,7 +1972,7 @@ export default function App(){
           <h1 style={{fontSize:14,fontWeight:700,color:C.w,margin:0}}>{curLabel}</h1>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:10,color:C.txD,padding:"3px 8px",background:C.sf2,borderRadius:4}}>23 herramientas</span>
+          <span style={{fontSize:10,color:C.txD,padding:"3px 8px",background:C.sf2,borderRadius:4}}>27 herramientas</span>
           <div style={{width:26,height:26,borderRadius:6,background:bg8(C.teal),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:C.teal}}>L</div>
         </div>
       </header>
