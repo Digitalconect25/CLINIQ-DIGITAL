@@ -10,11 +10,110 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  const body = req.body;
+  const provider = body.provider || 'anthropic';
+  const useStream = body.stream === true;
+
+  /* ── DEEPSEEK ── */
+  if (provider === 'deepseek') {
+    const dsKey = process.env.DEEPSEEK_API_KEY;
+    if (!dsKey) return res.status(500).json({ error: 'DEEPSEEK_API_KEY not configured. Añade la variable en Vercel > Settings > Environment Variables.' });
+
+    const dsBody = {
+      model: body.model || 'deepseek-chat',
+      max_tokens: body.max_tokens || 4096,
+      stream: useStream,
+      messages: [],
+    };
+    if (body.system) dsBody.messages.push({ role: 'system', content: body.system });
+    if (body.messages) dsBody.messages.push(...body.messages);
+    if (body.temperature !== undefined) dsBody.temperature = body.temperature;
+
+    try {
+      const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${dsKey}` },
+        body: JSON.stringify(dsBody),
+      });
+
+      if (useStream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        if (!response.ok) {
+          const errText = await response.text();
+          let errMsg;
+          try { errMsg = JSON.parse(errText).error?.message || errText.slice(0, 300); } catch(e) { errMsg = errText.slice(0, 300); }
+          res.write(`data: ${JSON.stringify({ type: 'error', error: { message: errMsg } })}\n\n`);
+          res.end();
+          return;
+        }
+
+        // Normalize OpenAI SSE -> Anthropic SSE so frontend stays unchanged
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let blockStarted = false;
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const raw = line.slice(6).trim();
+              if (raw === '[DONE]') {
+                res.write(`data: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
+                continue;
+              }
+              try {
+                const chunk = JSON.parse(raw);
+                const delta = chunk.choices?.[0]?.delta;
+                if (delta?.content) {
+                  if (!blockStarted) {
+                    res.write(`data: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
+                    blockStarted = true;
+                  }
+                  res.write(`data: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: delta.content } })}\n\n`);
+                }
+              } catch (pe) {}
+            }
+          }
+        } catch (streamErr) {
+          console.error('DeepSeek stream error:', streamErr);
+        }
+        res.end();
+      } else {
+        const text = await response.text();
+        let data;
+        try { data = JSON.parse(text); } catch (e) {
+          return res.status(502).json({ error: 'Respuesta no valida de DeepSeek: ' + text.slice(0, 200) });
+        }
+        const content = data.choices?.[0]?.message?.content || '';
+        return res.status(response.status).json({ content: [{ type: 'text', text: content }] });
+      }
+    } catch (error) {
+      console.error('DeepSeek proxy error:', error);
+      if (useStream) {
+        try {
+          res.write(`data: ${JSON.stringify({ type: 'error', error: { message: error.message } })}\n\n`);
+          res.end();
+        } catch(e) { res.end(); }
+      } else {
+        return res.status(500).json({ error: error.message || 'Internal server error' });
+      }
+    }
+    return;
+  }
+
+  /* ── ANTHROPIC (default) ── */
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured on server' });
-
-  const body = req.body;
-  const useStream = body.stream === true;
 
   try {
     const anthropicBody = {
@@ -45,7 +144,7 @@ export default async function handler(req, res) {
         const errText = await response.text();
         let errMsg;
         try { errMsg = JSON.parse(errText).error?.message || errText.slice(0, 200); } catch(e) { errMsg = errText.slice(0, 200); }
-        res.write(`data: ${JSON.stringify({ type: 'error', error: errMsg })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'error', error: { message: errMsg } })}\n\n`);
         res.end();
         return;
       }
@@ -78,7 +177,7 @@ export default async function handler(req, res) {
     console.error('Anthropic proxy error:', error);
     if (useStream) {
       try {
-        res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: 'error', error: { message: error.message } })}\n\n`);
         res.end();
       } catch(e) { res.end(); }
     } else {
