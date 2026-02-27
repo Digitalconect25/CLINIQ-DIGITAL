@@ -363,6 +363,12 @@ async function streamRequest(body,setO,setL,onText){
           await new Promise(ok=>setTimeout(ok,wait*1000));
           continue;
         }
+        // Fallback: if DeepSeek fails, try Claude Haiku
+        if(body.provider==="deepseek"&&attempt===maxRetries-1){
+          setO("DeepSeek no disponible, usando Claude...");
+          await new Promise(ok=>setTimeout(ok,1000));
+          return streamRequest({...body,provider:"anthropic",model:"claude-haiku-4-5-20251001"},setO,setL,onText);
+        }
         setO("ERROR API: "+(typeof errMsg==="string"?errMsg:JSON.stringify(errMsg)));setL(false);return null;
       }
       if(!body.stream){
@@ -412,10 +418,16 @@ async function streamRequest(body,setO,setL,onText){
         setO(`Error de conexion, reintentando en 5s...`);
         await new Promise(ok=>setTimeout(ok,5000));continue;
       }
+      // Fallback: DeepSeek connection error -> try Claude
+      if(body.provider==="deepseek"){
+        setO("DeepSeek no disponible, usando Claude...");
+        await new Promise(ok=>setTimeout(ok,1000));
+        return streamRequest({...body,provider:"anthropic",model:"claude-haiku-4-5-20251001"},setO,setL,onText);
+      }
       setO("Error de conexion: "+e.message);setL(false);return null;
     }
   }
-  setO("No se pudo completar la solicitud tras varios intentos. Espera 1 minuto y prueba de nuevo.");
+  setO("No se pudo completar la solicitud. Espera 1 minuto y prueba de nuevo.");
   setL(false);return null;
 }
 
@@ -423,21 +435,23 @@ async function streamRequest(body,setO,setL,onText){
 const MODELS={
   fast:"claude-haiku-4-5-20251001",
   mid:"claude-sonnet-4-5-20250929",
-  full:"claude-sonnet-4-20250514"
+  full:"claude-sonnet-4-20250514",
+  ds:"deepseek-chat",
+  dsr:"deepseek-reasoner"
 };
 function pickModel(toolHint){
-  const lite=["Respuesta Reseñas","Google Business","WhatsApp","Scripts Vídeo","Prompts Imagen IA","Multiplicador Contenido"];
-  const mid=["Landing Pages","Contenido SEO","Secuencias Seguimiento","Estrategia Redes","Arquitectura Web","Verificador Normativo","Manual Comunicación"];
-  if(lite.some(t=>toolHint?.includes(t))) return MODELS.fast;
-  if(mid.some(t=>toolHint?.includes(t))) return MODELS.mid;
-  return MODELS.full;
+  const ds=["Respuesta Reseñas","Google Business","WhatsApp","Scripts Vídeo","Prompts Imagen IA","Multiplicador Contenido","Manual Comunicación","Secuencias Seguimiento","Expansión Plataformas","Auditoría NAP","SEO Voz","Monitor de Marca"];
+  const mid=["Landing Pages","Contenido SEO","Estrategia Redes","Arquitectura Web","Verificador Normativo","Reporting Mensual"];
+  if(ds.some(t=>toolHint?.includes(t))) return {model:MODELS.ds,provider:"deepseek"};
+  if(mid.some(t=>toolHint?.includes(t))) return {model:MODELS.mid,provider:"anthropic"};
+  return {model:MODELS.full,provider:"anthropic"};
 }
 
 async function ai(sysExtra,prompt,setO,setL,niche,geo,logInfo){
   setL(true);setO("");
   const sys=buildSys(niche||"Servicio profesional",geo||"Espana")+"\n\n"+sysExtra;
-  const model=pickModel(logInfo?.tool||sysExtra);
-  const full=await streamRequest({model:model,max_tokens:4096,stream:true,system:sys,messages:[{role:"user",content:prompt}]},setO,setL);
+  const {model,provider}=pickModel(logInfo?.tool||sysExtra);
+  const full=await streamRequest({model,provider,max_tokens:4096,stream:true,system:sys,messages:[{role:"user",content:prompt}]},setO,setL);
   if(full&&!full.startsWith("Error")&&!full.startsWith("ERROR")){
     const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);
     logActivity(toolName,logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full);
