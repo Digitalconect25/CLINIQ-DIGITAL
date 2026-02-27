@@ -1,5 +1,8 @@
+export const config = {
+  maxDuration: 60,
+};
+
 export default async function handler(req, res) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -19,6 +22,9 @@ export default async function handler(req, res) {
     };
     if (body.tools) anthropicBody.tools = body.tools;
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 55000);
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -27,11 +33,25 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(anthropicBody),
+      signal: controller.signal,
     });
 
-    const data = await response.json();
+    clearTimeout(timeout);
+
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.error('Anthropic returned non-JSON:', text.slice(0, 500));
+      return res.status(502).json({ error: 'Respuesta no valida de Anthropic: ' + text.slice(0, 200) });
+    }
+
     return res.status(response.status).json(data);
   } catch (error) {
+    if (error.name === 'AbortError') {
+      return res.status(504).json({ error: 'La solicitud tardo demasiado. Intenta con un prompt mas corto o reduce max_tokens.' });
+    }
     console.error('Anthropic proxy error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
