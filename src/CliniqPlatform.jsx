@@ -336,8 +336,8 @@ function Out({content,loading,label}){
 
 /* ── AI ENGINE ── */
 function buildSys(nicheResolved, geo){
-  return `Estratega de marketing digital para negocios locales en Espana. Nicho: ${nicheResolved}. Geo: ${geo}.
-Reglas: Terminologia profesional del sector. SEO local (keyword en titulo, H2s, primer y ultimo parrafo, densidad 1-2%, LSI keywords, geo-keywords "[servicio] + [ciudad/barrio]"). Sector salud: cumplir regulacion publicitaria sanitaria espanola, sin claims de resultado. Texto limpio sin markdown/asteriscos/almohadillas. Espanol de Espana, comillas rectas, sin emojis. No inventar datos: usar [COMPLETAR] si faltan. Recomendaciones accionables y concretas. Precision sobre extension.`;
+  return `Estratega de marketing digital para negocios locales en Espana. AÑO ACTUAL: 2026. Nicho: ${nicheResolved}. Geo: ${geo}.
+Reglas: Terminologia profesional del sector. SEO local (keyword en titulo, H2s, primer y ultimo parrafo, densidad 1-2%, LSI keywords, geo-keywords "[servicio] + [ciudad/barrio]"). Sector salud: cumplir regulacion publicitaria sanitaria espanola, sin claims de resultado. Texto limpio sin markdown/asteriscos/almohadillas. Espanol de Espana, comillas rectas, sin emojis. No inventar datos: usar [COMPLETAR] si faltan. Recomendaciones accionables y concretas. Precision sobre extension. IMPORTANTE: Usa informacion, tendencias, datos y referencias de 2025-2026. No uses datos obsoletos.`;
 }
 
 async function streamRequest(body,setO,setL,onText){
@@ -785,7 +785,7 @@ function Seo(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Contenido SEO Geo-Optimizado" subtitle="Artículos posicionados para búsquedas locales" out={o} ld={l} label="Artículo SEO" btnTxt="Generar Artículo" btnCl={C.purple} ok={ni&&tp} onGen={()=>
-    ai("Experto SEO con especializacion en posicionamiento local para el sector sanitario y servicios profesionales en Espana.",
+    ai("Experto SEO en 2026 con especializacion en posicionamiento local para el sector sanitario y servicios profesionales en Espana. Aplica las mejores practicas SEO actualizadas a 2026.",
     `ARTICULO SEO GEO-OPTIMIZADO
 Tema: "${tp}"
 Keyword principal: "${kw||tp}"
@@ -865,7 +865,7 @@ function Social(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Estrategia Redes Sociales" subtitle="Calendario editorial completo con contenido listo para publicar" out={o} ld={l} label="Estrategia" btnTxt="Generar Estrategia" btnCl={C.purple} ok={!!ni} onGen={()=>
-    ai("Estratega de redes sociales especializado en negocios locales.",
+    ai("Estratega de redes sociales en 2026 especializado en negocios locales. Conoce las tendencias, algoritmos y formatos actuales de cada plataforma.",
     `Estrategia completa de ${pl} para: ${nm||"[Nombre]"}. Sector: ${nR}. Localizacion: ${geo}. Periodo: ${wk}. Objetivo: ${obj}.
 Genera: ANALISIS, PILARES DE CONTENIDO, CALENDARIO EDITORIAL, GUIONES REELS, STORIES, HASHTAGS, METRICAS, CUMPLIMIENTO NORMATIVO.`,sO,sL,nR,geo)}
     fields={<>
@@ -884,7 +884,7 @@ function Gbp(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Google Business Profile" subtitle="Optimización completa del perfil de negocio en Google" out={o} ld={l} label="Guía GBP" btnTxt="Generar Guía" btnCl={C.gold} ok={!!ni} onGen={()=>
-    ai("Especialista en Google Business Profile y SEO local.",
+    ai("Especialista en Google Business Profile y SEO local en 2026. Conoce las ultimas funcionalidades de GBP y los factores de ranking actualizados.",
     `Guia completa GBP para: ${nm||"[Nombre]"}. Localizacion: ${geo}. Sector: ${nR}.
 Genera: CHECKLIST OPTIMIZACION, ESTRATEGIA FOTOS, PUBLICACIONES (4 semanas), RESPUESTAS RESENAS, FAQ PROACTIVAS, MONITORIZACION.`,sO,sL,nR,geo)}
     fields={<>
@@ -900,7 +900,7 @@ function Video(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const srv=resolveTx(tx,ctx);
   return <Tool title="Scripts Vídeo" subtitle="Guiones completos listos para grabar" out={o} ld={l} label="Scripts" btnTxt="Generar Scripts" btnCl={C.orange} ok={ni&&srv} onGen={()=>
-    ai("Guionista de video para redes sociales del sector sanitario.",
+    ai("Guionista de video para redes sociales en 2026. Conoce los formatos, tendencias y algoritmos actuales de Instagram Reels, TikTok y YouTube Shorts.",
     `4 scripts de video sobre "${srv}" para ${pl}.
 Centro: ${nm||"[Nombre]"}. Profesional: ${dc||"[Nombre]"}. Objetivo: ${gl}.
 Genera 4 scripts: EDUCATIVO, MITOS, PROCESO, FAQ. Cada uno con GANCHO, DESARROLLO, CTA, TEXTO PANTALLA, INDICACIONES, COPY POST, HASHTAGS.`,sO,sL,nR,"Espana")}
@@ -920,7 +920,7 @@ function Competitor(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Competencia Local" subtitle="Análisis del posicionamiento competitivo en tu zona" out={o} ld={l} label="Análisis" btnTxt="Analizar" btnCl={C.cyan} ok={nm&&ci&&ni} onGen={()=>
-    ai("Analista de competencia digital con enfoque en SEO local.",
+    ai("Analista de competencia digital en 2026 con enfoque en SEO local.",
     `Analisis competencia local para: ${nm} en ${geo}. Competidores: ${cm||"Buscar principales"}. Sector: ${nR}.
 Genera: MAPA COMPETITIVO, WEB COMPARATIVO, SEO LOCAL, GOOGLE MAPS, REDES, PRECIOS, OPORTUNIDADES GEO-LOCALES, PLAN DE ACCION.`,sO,sL,nR,geo)}
     fields={<>
@@ -936,7 +936,7 @@ function Compliance(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);
   return <Tool title="Verificador Normativo" subtitle="Análisis de cumplimiento legal publicitario" out={o} ld={l} label="Informe" btnTxt="Verificar" btnCl={C.rose} ok={!!txt} onGen={()=>
-    ai("Consultor de cumplimiento normativo publicitario en Espana.",
+    ai("Consultor de cumplimiento normativo publicitario en Espana actualizado a 2026. Conoce la legislacion vigente, incluyendo LOPD-GDD, RGPD, Ley General de Publicidad, normativa AEMPS y regulacion autonomica actualizada.",
     `Analiza texto "${tp}" contra normativa del sector ${nR}:
 """
 ${txt}
@@ -1032,7 +1032,7 @@ function ScanPresencia(){
           <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Fld label="Web"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
           <Btn primary disabled={!nm||!ci||!ni} color={C.teal} onClick={()=>
-            aiSearch("Investigador de presencia digital. Busca en Internet informacion REAL sobre este negocio. Busca el nombre, resenas, perfiles en redes, directorios y menciones. Responde en espanol de Espana.",
+            aiSearch("Investigador de presencia digital en 2026. Busca en Internet informacion REAL y actualizada sobre este negocio. Busca el nombre, resenas, perfiles en redes, directorios y menciones. Responde en espanol de Espana.",
             `SCAN DE PRESENCIA DIGITAL 360 para: "${nm}" en ${ci}. Sector: ${nR}. Web: ${web||"No proporcionada"}.
 Busca: 1) "${nm}" en Google 2) "${nm} resenas" 3) "${nR} en ${ci}" 4) Presencia en Google Maps, Facebook, Instagram, Doctoralia, etc.
 Genera informe con: ESTADO POR PLATAFORMA, RESENAS, COMPETENCIA, GAPS, PLAN DE ACCION.`,sO,sL,nR,ci||"Espana",setPhase)
@@ -1063,7 +1063,7 @@ function DeepAnalysis(){
           <Fld label="Web"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
           <Fld label="Competidor"><Inp value={comp1} onChange={sComp1} ph="Nombre competidor"/></Fld>
           <Btn primary disabled={!nm||!ci||!ni} color={C.teal} onClick={()=>
-            aiSearch("Investigador digital profesional. Busca informacion REAL y VERIFICABLE. NO inventes datos. Responde en espanol de Espana.",
+            aiSearch("Investigador digital profesional en 2026. Busca informacion REAL, VERIFICABLE y ACTUALIZADA. NO inventes datos. Responde en espanol de Espana.",
             `ANALISIS PROFUNDO para: "${nm}" en ${ci}. Sector: ${nR}. Web: ${web||"No proporcionada"}. Competidor: ${comp1||"Buscar principales"}.
 Busca: presencia Google, resenas, redes, competencia, SEO. Genera informe con FUENTES REALES.`,sO,sL,nR,ci||"Espana",setPhase)
           }>Investigar en Internet</Btn>
@@ -1080,7 +1080,7 @@ function Expansion(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);
   return <Tool title="Expansión Plataformas" subtitle="Guía paso a paso para dar de alta el negocio en plataformas" out={o} ld={l} label="Guía Expansión" btnTxt="Generar Guía" btnCl={C.blue} ok={nm&&ci&&ni} onGen={()=>
-    ai("Especialista en local listings y expansion digital para negocios locales en Espana.",
+    ai("Especialista en local listings y expansion digital en 2026 para negocios locales en Espana. Conoce las plataformas y directorios relevantes actualizados.",
     `GUIA DE EXPANSION DIGITAL para: "${nm}" en ${ci}. Sector: ${nR}. Dir: ${dir||"[COMPLETAR]"}. Tel: ${tel||"[COMPLETAR]"}. Web: ${web||"[COMPLETAR]"}.
 Genera guia COMPLETA para: Google Business, Google Maps, Bing Places, Apple Maps, Facebook, Instagram, LinkedIn, Paginas Amarillas, Doctoralia (si salud). Para cada una: URL acceso, pasos, datos a introducir, descripcion optimizada, fotos, primeras acciones.`,sO,sL,nR,ci||"Espana")}
     fields={<>
@@ -1128,7 +1128,7 @@ function Reputation(){
           <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
           <Fld label="Ciudad"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Btn primary disabled={!nm||!ni} color={C.teal} onClick={()=>
-            aiSearch("Investigador de reputacion online. Busca resenas REALES en Google, Facebook, Doctoralia. Responde en espanol de Espana.",
+            aiSearch("Investigador de reputacion online en 2026. Busca resenas REALES y actualizadas en Google, Facebook, Doctoralia. Responde en espanol de Espana.",
             `DIAGNOSTICO REPUTACION para: "${nm}" en ${ci||"Espana"}. Sector: ${nR}.
 Busca resenas reales, compara con competencia, analiza sentimiento. Genera plan de solicitud de resenas y protocolo respuesta.`,sO,sL,nR,ci||"Espana",setPhase)
           }>Buscar reseñas reales</Btn>
@@ -1149,7 +1149,7 @@ function VoiceSeo(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);
   return <Tool title="SEO para Búsquedas por Voz" subtitle="Optimiza para Google Assistant, Siri, Alexa" out={o} ld={l} label="Voice SEO" btnTxt="Generar Estrategia" btnCl={C.purple} ok={nm&&ci&&ni} onGen={()=>
-    ai("Especialista en Voice Search Optimization para negocios locales en Espana.",
+    ai("Especialista en Voice Search Optimization en 2026 para negocios locales en Espana. Conoce las ultimas tendencias en busqueda por voz con Alexa, Google Assistant y Siri.",
     `ESTRATEGIA VOICE SEO para: ${nm} en ${ci}. Sector: ${nR}.
 Genera: CONSULTAS DE VOZ, FUENTES POR ASISTENTE, CONTENIDO OPTIMIZADO, SCHEMA MARKUP, BUSQUEDAS CERCA DE MI, METRICAS.`,sO,sL,nR,ci||"Espana")}
     fields={<>
@@ -1182,7 +1182,7 @@ function ImagePrompt(){
   const nR=resolveNiche(ni,cni);
   const platforms=["Midjourney","DALL-E 3","Stable Diffusion","Ideogram","Leonardo AI","Canva IA","Adobe Firefly","Flux","Todos"];
   return <Tool title="Prompts Imagen IA" subtitle="Prompts optimizados para cada plataforma de IA generativa" out={o} ld={l} label="Prompts" btnTxt="Generar Prompts" btnCl={C.rose} ok={ni&&idea} onGen={()=>
-    ai("Experto en prompt engineering para generacion de imagenes IA. Prompts para Midjourney/DALL-E/SD/Leonardo/Flux EN INGLES. Explicaciones en espanol de Espana.",
+    ai("Experto en prompt engineering para generacion de imagenes IA en 2026. Prompts para Midjourney v6/DALL-E 3/Flux/SD3/Leonardo EN INGLES. Explicaciones en espanol de Espana.",
     `PROMPTS DE IMAGEN IA
 Sector: ${nR}. Centro: ${nm||"[Negocio]"}. Idea: ${idea}. Plataforma: ${platform}. Estilo: ${style}.
 Genera 4 prompts COMPLETOS listos para copiar, con parametros, negative prompt, instrucciones uso, tips del sector.`,sO,sL,nR,"Espana",
@@ -1212,7 +1212,7 @@ function ImplementHub(){
           <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
           <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Btn primary disabled={!nm||!ni} color={C.rose} onClick={()=>
-            aiSearch("Consultor de marketing digital. Busca el negocio en Internet, detecta estado real y genera plan personalizado. Responde en espanol de Espana.",
+            aiSearch("Consultor de marketing digital en 2026. Busca el negocio en Internet, detecta estado real actualizado y genera plan personalizado. Responde en espanol de Espana.",
             `PLAN IMPLEMENTACION para: "${nm}" en ${ci}. Sector: ${nR}.
 Busca el negocio, detecta estado real, genera: DIAGNOSTICO EXPRESS, FASE 1 URGENTE, FASE 2 CORTO PLAZO, FASE 3 MEDIO PLAZO, MANTENIMIENTO, IMPACTO ESTIMADO.`,sO,sL,nR,ci||"Espana",setPhase)
           }>Generar Plan (busca en Internet)</Btn>
@@ -1527,7 +1527,7 @@ function ContentMultiplier(){
           <Fld label="Contenido origen *"><Txa value={src} onChange={setSrc} ph="Pega aqui el texto base, describe el tema o escribe la idea principal. La IA lo adaptara a 8 canales diferentes con formato, tono y longitud optimizados para cada uno..." rows={8}/></Fld>
           <Btn primary disabled={!src||!ni} color={C.cyan} onClick={()=>{
             setChTab("all");
-            ai("Equipo de content marketing. Transforma UN contenido en 8 piezas DIFERENTES optimizadas por canal. No recicles texto, adapta formato/tono/estructura/gancho/CTA nativamente.",
+            ai("Equipo de content marketing en 2026. Transforma UN contenido en 8 piezas DIFERENTES optimizadas por canal. No recicles texto, adapta formato/tono/estructura/gancho/CTA nativamente. Usa tendencias y formatos actuales de cada plataforma.",
             `CONTENIDO ORIGEN (${srcType}):
 """
 ${src}
@@ -1631,7 +1631,7 @@ function ProposalGenerator(){
           <Fld label="Competencia conocida"><Inp value={comp} onChange={sComp} ph="Nombres de competidores directos"/></Fld>
           <Fld label="Notas adicionales"><Txa value={notas} onChange={sNotas} ph="Contexto del cliente, objeciones, puntos clave..." rows={3}/></Fld>
           <Btn primary disabled={!nm||!ni||!ci} color={C.gold} onClick={()=>
-            ai("Director comercial de agencia de marketing digital. Propuestas profesionales, persuasivas, con ROI realista y conservador. Sin promesas vacias.",
+            ai("Director comercial de agencia de marketing digital en 2026. Propuestas profesionales, persuasivas, con ROI realista y conservador basado en datos actualizados. Sin promesas vacias.",
             `PROPUESTA COMERCIAL para: "${nm}". Contacto: ${contacto||"[Responsable]"}. Sector: ${nR}. Geo: ${geo}. Web: ${web||"N/A"}. Plan: ${plan} (${PLANS.find(p=>p.lb===plan)?.price||"497"} EUR/mes). Objetivo: ${obj||"Captar clientes"}. Competencia: ${comp||"N/A"}. Notas: ${notas||"N/A"}.
 
 Secciones:
@@ -1685,7 +1685,7 @@ function MultiCampaign(){
           <Fld label="Presupuesto ads (opcional)"><Sel value={budget} onChange={sBudget} opts={["Sin inversión en ads","100-300 EUR","300-500 EUR","500-1000 EUR","1000-2000 EUR","+2000 EUR"]}/></Fld>
           <Fld label="Contexto adicional"><Txa value={notas} onChange={sNotas} ph="Detalles especificos: oferta concreta, fecha evento, profesional destacado..." rows={3}/></Fld>
           <Btn primary disabled={!srv||!ni||!nm} color={C.rose} onClick={()=>
-            ai("Director de campanas multicanal para negocios locales. Campanas COORDINADAS donde cada canal refuerza a los demas con timing preciso.",
+            ai("Director de campanas multicanal en 2026 para negocios locales. Campanas COORDINADAS donde cada canal refuerza a los demas con timing preciso. Usa formatos y tendencias actuales.",
             `CAMPAÑA MULTICANAL: "${nm}" (${nR}) en ${geo}. Objetivo: ${obj}. Servicio: "${srv}". Duracion: ${dur}. Ads: ${budget}. Notas: ${notas||"N/A"}.
 
 Secciones:
@@ -1723,12 +1723,12 @@ function MetaAdsPro(){
 
   const genStrategy=()=>{
     setTab("strategy");
-    aiSearch("Media Buyer senior de Meta Ads para negocios locales en Espana. Busca benchmarks reales del sector. Recomendaciones accionables, no teoricas.",
+    aiSearch("Media Buyer senior de Meta Ads para negocios locales en Espana en 2026. Busca benchmarks reales y actualizados del sector. Recomendaciones accionables, no teoricas.",
     `ESTRATEGIA META ADS para: "${nm||"[Nombre]"}" (${nR}) en ${geo}. Servicio: "${srv||"General"}". Web: ${web||"N/A"}.
 Objetivo: ${obj}. Presupuesto: ${budget}. Duracion: ${dur}. Exp. previa: ${prevAds}.
 Audiencia: ${audience||"Por definir"}. Competencia: ${comp||"N/A"}. USP: ${usp||"N/A"}. Oferta: ${offer||"N/A"}.
 
-Busca: CPM/CTR/CPL benchmarks para ${nR} en Espana, politicas Meta sector salud.
+Busca: CPM/CTR/CPL benchmarks 2025-2026 para ${nR} en Espana, politicas Meta sector salud actualizadas.
 
 Genera estas secciones:
 1. DIAGNOSTICO PRE-CAMPANA: objetivo vs presupuesto realista, politicas Meta aplicables, requisitos pixel/CAPI/legales
@@ -1745,7 +1745,7 @@ Genera estas secciones:
 
   const genCreatives=()=>{
     setTab("creatives");
-    ai("Director creativo de Meta Ads para negocios locales. Crea creatividades que convierten. Prompts de imagen IA detallados en ingles (Midjourney v6). Copies que pasan revision Meta.",
+    ai("Director creativo de Meta Ads en 2026 para negocios locales. Crea creatividades que convierten con los formatos y tendencias actuales. Prompts de imagen IA detallados en ingles (Midjourney v6 / DALL-E 3). Copies que pasan revision Meta.",
     `PACK CREATIVO META ADS para: "${nm||"[Nombre]"}" (${nR}) en ${geo}. Servicio: "${srv||"General"}".
 Objetivo: ${obj}. USP: ${usp||"N/A"}. Oferta: ${offer||"Sin oferta"}.
 
@@ -1870,11 +1870,11 @@ function PredictiveDashboard(){
           </div>
           <Btn primary disabled={!nm||!ni||!ci} color={C.green} onClick={()=>{
             setTab("projections");
-            aiSearch("Analista de marketing digital. Proyecciones REALISTAS con benchmarks sector Espana. Rangos conservadores. Busca datos reales.",
+            aiSearch("Analista de marketing digital en 2026. Proyecciones REALISTAS con benchmarks actualizados del sector en Espana. Rangos conservadores. Busca datos reales recientes.",
             `DASHBOARD PREDICTIVO: "${nm}" en ${ci}. Sector: ${nR}. Meses activo: ${mesesActivo}.
 Metricas: ${[visitas&&"visitas:"+visitas,leads&&"leads:"+leads,conv&&"conv:"+conv,ticket&&"ticket:"+ticket+"EUR",resenas&&"resenas:"+resenas+"("+nota+")",seguidores&&"seguidores:"+seguidores,gbpViews&&"GBP:"+gbpViews,kwPos&&"SEO:"+kwPos,inversionAds&&"ads:"+inversionAds+"EUR"].filter(Boolean).join(", ")||"Sin metricas"}.
 
-Busca benchmarks ${nR} Espana: conversion, ticket medio, crecimiento organico.
+Busca benchmarks 2025-2026 ${nR} Espana: conversion, ticket medio, crecimiento organico.
 
 Secciones:
 1. ESTADO ACTUAL: cada metrica vs benchmark, puntuacion /100, fortalezas/debilidades
