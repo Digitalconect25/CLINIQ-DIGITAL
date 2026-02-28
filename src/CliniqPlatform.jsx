@@ -1446,37 +1446,281 @@ Busca el negocio, detecta estado real, genera: DIAGNOSTICO EXPRESS, FASE 1 URGEN
 }
 
 /* ══════ LOPD GENERATOR ══════ */
-function generateLOPD(client){
+function LOPDDocument({client,onClose}){
   const today=new Date().toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"});
-  return `DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION
-PROTECCION DE DATOS PERSONALES (RGPD y LOPDGDD)
+  const[consent1,setConsent1]=useState(false);
+  const[consent2,setConsent2]=useState(false);
+  const[consent3,setConsent3]=useState(false);
+  const[comercial,setComercial]=useState("autorizo");
+  const[saved,setSaved]=useState(false);
 
-RESPONSABLE: CLINIQ DIGITAL / ${client.empresa||"[EMPRESA]"}
-CIF/NIF: ${client.cif||"[CIF/NIF]"}
-Domicilio: ${client.dirFiscal||"[DIRECCION]"}, ${client.cpFiscal||""} ${client.ciudadFiscal||"[CIUDAD]"}
-Email: ${client.emailEmpresa||"[EMAIL]"}
+  const empresa=client.empresa||"Cliniq Digital";
+  const cifEmpresa=client.cifEmpresa||"[CIF EMPRESA]";
+  const dirEmpresa=client.dirFiscal||"[DIRECCION EMPRESA]";
+  const emailEmpresa=client.emailEmpresa||"info@cliniqdigital.com";
 
-INTERESADO: ${client.nombre||"[NOMBRE]"}
+  const printDoc=()=>{
+    const w=window.open("","_blank");
+    if(!w) return;
+    w.document.write(buildHTML());
+    w.document.close();
+    setTimeout(()=>w.print(),600);
+  };
+
+  const copyDoc=()=>{
+    const txt=buildPlainText();
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(()=>setSaved(true)).catch(()=>{
+        fallbackCopy(txt);
+      });
+    }else{fallbackCopy(txt);}
+    setTimeout(()=>setSaved(false),2000);
+  };
+
+  const fallbackCopy=(txt)=>{
+    const ta=document.createElement("textarea");
+    ta.value=txt;ta.style.position="fixed";ta.style.left="-9999px";
+    document.body.appendChild(ta);ta.select();
+    try{document.execCommand("copy");setSaved(true);}catch(e){}
+    document.body.removeChild(ta);
+  };
+
+  const buildPlainText=()=>`DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION
+PROTECCION DE DATOS PERSONALES
+(Conforme al Reglamento General de Proteccion de Datos UE 2016/679
+y Ley Organica 3/2018 de Proteccion de Datos Personales y Garantia de los Derechos Digitales)
+
+===================================================================
+
+1. DATOS DEL RESPONSABLE DEL TRATAMIENTO
+
+Razon social: ${empresa}
+CIF/NIF: ${cifEmpresa}
+Domicilio: ${dirEmpresa}
+Email de contacto: ${emailEmpresa}
+Delegado de Proteccion de Datos: ${emailEmpresa}
+
+2. DATOS DEL INTERESADO (CLIENTE)
+
+Nombre / Razon social: ${client.nombre||"[NOMBRE]"}
 NIF/CIF: ${client.nif||"[NIF/CIF]"}
-Domicilio: ${client.dirFiscal||"[DIRECCION]"}, ${client.cpFiscal||""} ${client.ciudadFiscal||"[CIUDAD]"}
-Email: ${client.email||"[EMAIL]"} | Tel: ${client.telefono||"[TEL]"}
-Contacto: ${client.contacto||"[CONTACTO]"}
+Domicilio fiscal: ${client.dirFiscal||"[DIRECCION]"}, ${client.cpFiscal||""} ${client.ciudadFiscal||"[CIUDAD]"} (${client.provinciaFiscal||""})
+Email: ${client.email||"[EMAIL]"}
+Telefono: ${client.telefono||"[TELEFONO]"}
+Persona de contacto: ${client.contacto||"[CONTACTO]"}
+Cargo: ${client.cargoContacto||"[CARGO]"}
 
-FINALIDAD: Gestion relacion contractual (plan ${client.plan||"[PLAN]"}), facturacion, presencia digital, reputacion online, contenido digital, comunicaciones comerciales.
-BASE JURIDICA: Art. 6.1.b) RGPD (contrato), Art. 6.1.a) (consentimiento), Art. 6.1.c) (obligaciones legales).
-CONSERVACION: Vigencia contractual + plazos legales (4 anos fiscal, 5 anos contractual).
-DERECHOS: Acceso, rectificacion, supresion, limitacion, portabilidad, oposicion. Ejercicio por escrito o email.
-Reclamaciones: Agencia Espanola de Proteccion de Datos (www.aepd.es).
+3. FINALIDAD DEL TRATAMIENTO
 
-CONSENTIMIENTO
-D./Da. ${client.contacto||client.nombre||"_______"}, NIF ${client.nif||"_______"}:
-[ ] CONSIENTO el tratamiento para las finalidades descritas.
-[ ] AUTORIZO la gestion de presencia digital de mi negocio.
-[ ] AUTORIZO / NO AUTORIZO comunicaciones comerciales.
+Los datos personales facilitados seran tratados con las siguientes finalidades:
+a) Gestion de la relacion contractual (Plan: ${client.plan||"[PLAN]"})
+b) Facturacion y cobro de los servicios contratados
+c) Gestion de presencia digital y reputacion online del negocio del interesado
+d) Creacion y gestion de contenido digital en nombre del interesado
+e) Comunicaciones relacionadas con el servicio contratado
+${comercial==="autorizo"?"f) Envio de comunicaciones comerciales sobre servicios propios":""}
 
-En ${client.ciudadFiscal||"_______"}, a ${today}.
+4. BASE JURIDICA DEL TRATAMIENTO
 
-Firma cliente: _________________ Firma responsable: _________________`;
+- Art. 6.1.b) RGPD: Ejecucion de contrato o medidas precontractuales
+- Art. 6.1.a) RGPD: Consentimiento del interesado
+- Art. 6.1.c) RGPD: Cumplimiento de obligaciones legales (fiscales, mercantiles)
+
+5. PLAZO DE CONSERVACION
+
+Los datos se conservaran durante la vigencia de la relacion contractual y, tras su finalizacion, durante los plazos legalmente establecidos:
+- 4 anos para obligaciones fiscales y tributarias
+- 5 anos para obligaciones contractuales y civiles
+- 3 anos para datos de caracter personal sin otra base legal
+
+6. DESTINATARIOS DE LOS DATOS
+
+Los datos podran ser comunicados a:
+- Administraciones publicas cuando exista obligacion legal
+- Proveedores tecnologicos necesarios para la prestacion del servicio (hosting, herramientas digitales)
+- No se realizan transferencias internacionales de datos fuera del EEE
+
+7. DERECHOS DEL INTERESADO
+
+El interesado podra ejercer los siguientes derechos:
+- Derecho de acceso a sus datos personales
+- Derecho de rectificacion de datos inexactos
+- Derecho de supresion ("derecho al olvido")
+- Derecho a la limitacion del tratamiento
+- Derecho a la portabilidad de los datos
+- Derecho de oposicion al tratamiento
+
+Ejercicio de derechos: Por escrito a ${dirEmpresa} o email a ${emailEmpresa}
+Plazo de respuesta: 1 mes desde la recepcion de la solicitud
+Reclamaciones: Agencia Espanola de Proteccion de Datos (www.aepd.es)
+
+8. CONSENTIMIENTO
+
+D./Da. ${client.contacto||client.nombre||"_________________________"}, con NIF ${client.nif||"_____________"}, en calidad de ${client.cargoContacto||"representante legal"} de ${client.nombre||"_________________________"}:
+
+${consent1?"[X]":"[ ]"} CONSIENTO expresamente el tratamiento de mis datos para las finalidades descritas en el apartado 3.
+${consent2?"[X]":"[ ]"} AUTORIZO la gestion de la presencia digital de mi negocio en las plataformas acordadas.
+${consent3?"[X]":"[ ]"} ${comercial==="autorizo"?"AUTORIZO":"NO AUTORIZO"} el envio de comunicaciones comerciales sobre servicios propios.
+
+En ${client.ciudadFiscal||"_____________"}, a ${today}.
+
+
+
+Firma del cliente:                          Firma del responsable:
+
+
+_________________________              _________________________
+${client.contacto||client.nombre||""}              ${empresa}
+NIF: ${client.nif||""}                      CIF: ${cifEmpresa}`;
+
+  const buildHTML=()=>`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><title>LOPD - ${client.nombre}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Georgia,'Times New Roman',serif;padding:50px 70px;line-height:1.7;font-size:12.5px;color:#1a1a1a;max-width:820px;margin:auto}
+h1{font-size:16px;text-align:center;margin-bottom:4px;letter-spacing:1px}
+h2{font-size:11px;text-align:center;color:#555;margin-bottom:30px;font-weight:400}
+h3{font-size:13px;margin:24px 0 8px;border-bottom:1px solid #ccc;padding-bottom:4px}
+.header{border:2px solid #333;padding:20px 30px;margin-bottom:30px;text-align:center}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;margin:8px 0 16px}
+.grid div{font-size:12px}
+.label{color:#666;font-weight:600}
+.check{margin:6px 0;font-size:12.5px}
+.sig{display:flex;justify-content:space-between;margin-top:60px}
+.sig-box{width:45%;text-align:center}
+.sig-line{border-bottom:1px solid #333;height:50px;margin-bottom:6px}
+.sig-name{font-size:11px;color:#555}
+.footer{text-align:center;margin-top:40px;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:12px}
+@media print{body{padding:30px 50px}button{display:none!important}}
+</style></head><body>
+<div class="header">
+<h1>DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION</h1>
+<h2>Proteccion de Datos Personales - RGPD (UE 2016/679) y LOPDGDD (LO 3/2018)</h2>
+</div>
+${buildPlainText().split("\n").map(l=>"<p>"+l.replace(/</g,"&lt;")+"</p>").join("")}
+<div class="footer">Documento generado el ${today} - ${empresa}</div>
+</body></html>`;
+
+  const Chk=({checked,onChange,label})=><div onClick={()=>onChange(!checked)} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 0",cursor:"pointer"}}>
+    <div style={{width:20,height:20,borderRadius:4,border:"2px solid "+(checked?C.green:C.bd),background:checked?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
+      {checked&&<span style={{color:C.bg,fontSize:13,fontWeight:700}}>✓</span>}
+    </div>
+    <span style={{fontSize:13,color:C.w,lineHeight:1.5}}>{label}</span>
+  </div>;
+
+  return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.85)",zIndex:9999,overflowY:"auto",padding:"20px"}}>
+    <div style={{maxWidth:800,margin:"0 auto",background:C.sf,border:"1px solid "+C.bd,borderRadius:14,overflow:"hidden"}}>
+      <div style={{padding:"20px 24px",borderBottom:"1px solid "+C.bd,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:C.sf,zIndex:1}}>
+        <div>
+          <h3 style={{fontSize:16,fontWeight:700,color:C.w,margin:0}}>Documento LOPD / RGPD</h3>
+          <p style={{fontSize:12,color:C.txD,margin:"2px 0 0"}}>{client.nombre} - {today}</p>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <Btn small primary color={C.green} onClick={copyDoc}>{saved?"Copiado!":"Copiar"}</Btn>
+          <Btn small primary color={C.blue} onClick={printDoc}>Imprimir</Btn>
+          <Btn small onClick={onClose}>Cerrar</Btn>
+        </div>
+      </div>
+
+      <div style={{padding:24}}>
+        <div style={{textAlign:"center",padding:"16px 20px",border:"2px solid "+C.teal,borderRadius:10,marginBottom:24}}>
+          <div style={{fontSize:15,fontWeight:700,color:C.w,letterSpacing:1}}>DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION</div>
+          <div style={{fontSize:12,color:C.txD,marginTop:4}}>Proteccion de Datos Personales - RGPD (UE 2016/679) y LOPDGDD (LO 3/2018)</div>
+        </div>
+
+        <Crd sx={{marginBottom:16}}>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.teal,margin:"0 0 10px"}}>1. DATOS DEL RESPONSABLE DEL TRATAMIENTO</h4>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 20px",fontSize:13}}>
+            <div><span style={{color:C.txD}}>Razon social:</span> <span style={{color:C.w}}>{empresa}</span></div>
+            <div><span style={{color:C.txD}}>CIF/NIF:</span> <span style={{color:C.w}}>{cifEmpresa}</span></div>
+            <div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Domicilio:</span> <span style={{color:C.w}}>{dirEmpresa}</span></div>
+            <div><span style={{color:C.txD}}>Email:</span> <span style={{color:C.w}}>{emailEmpresa}</span></div>
+          </div>
+        </Crd>
+
+        <Crd sx={{marginBottom:16}}>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.blue,margin:"0 0 10px"}}>2. DATOS DEL INTERESADO (CLIENTE)</h4>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 20px",fontSize:13}}>
+            <div><span style={{color:C.txD}}>Nombre:</span> <span style={{color:C.w}}>{client.nombre||"-"}</span></div>
+            <div><span style={{color:C.txD}}>NIF/CIF:</span> <span style={{color:C.w}}>{client.nif||"-"}</span></div>
+            <div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Domicilio:</span> <span style={{color:C.w}}>{client.dirFiscal||"-"}, {client.cpFiscal||""} {client.ciudadFiscal||"-"} ({client.provinciaFiscal||""})</span></div>
+            <div><span style={{color:C.txD}}>Email:</span> <span style={{color:C.w}}>{client.email||"-"}</span></div>
+            <div><span style={{color:C.txD}}>Telefono:</span> <span style={{color:C.w}}>{client.telefono||"-"}</span></div>
+            <div><span style={{color:C.txD}}>Contacto:</span> <span style={{color:C.w}}>{client.contacto||"-"}</span></div>
+            <div><span style={{color:C.txD}}>Cargo:</span> <span style={{color:C.w}}>{client.cargoContacto||"-"}</span></div>
+          </div>
+        </Crd>
+
+        <Crd sx={{marginBottom:16}}>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.purple,margin:"0 0 10px"}}>3. FINALIDAD DEL TRATAMIENTO</h4>
+          <div style={{fontSize:13,color:C.tx,lineHeight:1.7}}>
+            <p style={{marginBottom:6}}>Los datos personales seran tratados para:</p>
+            <p>a) Gestion de la relacion contractual (Plan: <span style={{color:C.w,fontWeight:600}}>{client.plan||"-"}</span>)</p>
+            <p>b) Facturacion y cobro de los servicios contratados</p>
+            <p>c) Gestion de presencia digital y reputacion online</p>
+            <p>d) Creacion y gestion de contenido digital</p>
+            <p>e) Comunicaciones relacionadas con el servicio</p>
+          </div>
+        </Crd>
+
+        <Crd sx={{marginBottom:16}}>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.gold,margin:"0 0 10px"}}>4. BASE JURIDICA</h4>
+          <div style={{fontSize:13,color:C.tx,lineHeight:1.7}}>
+            <p>Art. 6.1.b) RGPD - Ejecucion de contrato</p>
+            <p>Art. 6.1.a) RGPD - Consentimiento del interesado</p>
+            <p>Art. 6.1.c) RGPD - Cumplimiento de obligaciones legales</p>
+          </div>
+        </Crd>
+
+        <Crd sx={{marginBottom:16}}>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.cyan,margin:"0 0 10px"}}>5. CONSERVACION / 6. DESTINATARIOS / 7. DERECHOS</h4>
+          <div style={{fontSize:12,color:C.tx,lineHeight:1.7}}>
+            <p><span style={{color:C.w,fontWeight:600}}>Conservacion:</span> Vigencia contractual + plazos legales (4 anos fiscal, 5 anos contractual, 3 anos datos personales)</p>
+            <p style={{marginTop:6}}><span style={{color:C.w,fontWeight:600}}>Destinatarios:</span> Administraciones publicas (obligacion legal), proveedores tecnologicos. Sin transferencias fuera del EEE.</p>
+            <p style={{marginTop:6}}><span style={{color:C.w,fontWeight:600}}>Derechos:</span> Acceso, rectificacion, supresion, limitacion, portabilidad, oposicion. Ejercicio: {emailEmpresa}. Plazo: 1 mes. Reclamaciones: AEPD (www.aepd.es)</p>
+          </div>
+        </Crd>
+
+        <Crd sx={{marginBottom:16,borderColor:C.teal}}>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.green,margin:"0 0 12px"}}>8. CONSENTIMIENTO</h4>
+          <p style={{fontSize:13,color:C.tx,marginBottom:12}}>D./Da. <span style={{color:C.w,fontWeight:600}}>{client.contacto||client.nombre||"_________"}</span>, con NIF <span style={{color:C.w,fontWeight:600}}>{client.nif||"_________"}</span>, en calidad de {client.cargoContacto||"representante legal"} de <span style={{color:C.w,fontWeight:600}}>{client.nombre||"_________"}</span>:</p>
+          <Chk checked={consent1} onChange={setConsent1} label="CONSIENTO expresamente el tratamiento de mis datos personales para las finalidades descritas en el apartado 3."/>
+          <Chk checked={consent2} onChange={setConsent2} label="AUTORIZO la gestion de la presencia digital de mi negocio en las plataformas acordadas."/>
+          <div style={{marginTop:8,marginBottom:4}}>
+            <Fld label="Comunicaciones comerciales">
+              <Sel value={comercial} onChange={setComercial} opts={[{v:"autorizo",l:"AUTORIZO el envio de comunicaciones comerciales"},{v:"no_autorizo",l:"NO AUTORIZO el envio de comunicaciones comerciales"}]}/>
+            </Fld>
+          </div>
+          <Chk checked={consent3} onChange={setConsent3} label={comercial==="autorizo"?"AUTORIZO el envio de comunicaciones comerciales sobre servicios propios.":"NO AUTORIZO el envio de comunicaciones comerciales."}/>
+        </Crd>
+
+        <Crd sx={{marginBottom:16}}>
+          <p style={{fontSize:13,color:C.tx,marginBottom:20}}>En <span style={{color:C.w,fontWeight:600}}>{client.ciudadFiscal||"_____________"}</span>, a <span style={{color:C.w,fontWeight:600}}>{today}</span>.</p>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:40}}>
+            <div style={{textAlign:"center"}}>
+              <p style={{fontSize:11,color:C.txD,marginBottom:8}}>Firma del cliente</p>
+              <div style={{height:80,border:"1px dashed "+C.bd,borderRadius:8,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <span style={{fontSize:11,color:C.txD,fontStyle:"italic"}}>Espacio para firma</span>
+              </div>
+              <p style={{fontSize:12,color:C.w}}>{client.contacto||client.nombre||""}</p>
+              <p style={{fontSize:11,color:C.txD}}>NIF: {client.nif||""}</p>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <p style={{fontSize:11,color:C.txD,marginBottom:8}}>Firma del responsable</p>
+              <div style={{height:80,border:"1px dashed "+C.bd,borderRadius:8,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <span style={{fontSize:11,color:C.txD,fontStyle:"italic"}}>Espacio para firma</span>
+              </div>
+              <p style={{fontSize:12,color:C.w}}>{empresa}</p>
+              <p style={{fontSize:11,color:C.txD}}>CIF: {cifEmpresa}</p>
+            </div>
+          </div>
+        </Crd>
+
+        <div style={{textAlign:"center",padding:"16px",fontSize:11,color:C.txD}}>
+          Documento generado el {today} - {empresa}
+        </div>
+      </div>
+    </div>
+  </div>;
 }
 
 /* ══════ CLIENTS ══════ */
@@ -1495,7 +1739,6 @@ function Clients(){
   const[f,setF]=useState({...emptyClient});
   const[tab,setTab]=useState("list");
   const[sel,setSel]=useState(null);
-  const[lopdView,setLopdView]=useState(null);
   const[logFilter,setLogFilter]=useState("all");
   const[editId,setEditId]=useState(null);
   const[editLog,setEditLog]=useState(null);
@@ -1503,6 +1746,7 @@ function Clients(){
   const[logSearch,setLogSearch]=useState("");
   const[logToolFilter,setLogToolFilter]=useState("all");
   const[shareLink,setShareLink]=useState("");
+  const[lopdClient,setLopdClient]=useState(null);
 
   useEffect(()=>{
     db.getClients().then(data=>{
@@ -1552,12 +1796,6 @@ function Clients(){
     ACTIVITY_LOG.length=0;
     db.clearActivity&&db.clearActivity().catch(()=>{});
     forceUpdate(n=>n+1);
-  };
-
-  const printLOPD=(client)=>{
-    const doc=generateLOPD(client);
-    const w=window.open("","_blank");
-    w.document.write(`<html><head><title>LOPD - ${client.nombre}</title><style>body{font-family:'Courier New',monospace;padding:40px 60px;line-height:1.8;font-size:13px;max-width:800px;margin:auto}@media print{body{padding:20px}}</style></head><body><pre style="white-space:pre-wrap">${doc.replace(/</g,"&lt;")}</pre><script>setTimeout(()=>window.print(),500)<\/script></body></html>`);
   };
 
   const allLog=ACTIVITY_LOG;
@@ -1640,19 +1878,30 @@ function Clients(){
           </div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <Btn small primary color={C.blue} onClick={(e)=>{e.stopPropagation();startEdit(c);}}>Editar</Btn>
-            <Btn small primary color={C.teal} onClick={(e)=>{e.stopPropagation();printLOPD(c);}}>LOPD</Btn>
-            <Btn small color={C.gold} onClick={(e)=>{e.stopPropagation();navigator.clipboard.writeText(generateLOPD(c));}}>Copiar LOPD</Btn>
+            <Btn small primary color={C.teal} onClick={(e)=>{e.stopPropagation();setLopdClient(c);}}>LOPD</Btn>
             {clientLog.length>0&&<Btn small primary color={C.cyan} onClick={(e)=>{e.stopPropagation();exportLogPDF(clientLog,c.nombre);}}>Log PDF</Btn>}
-            <Btn small primary color={C.green} onClick={async(e)=>{e.stopPropagation();const token=await db.getShareToken(c.id);if(token){const url=window.location.origin+"/api/client-view?token="+token;setShareLink(url);navigator.clipboard.writeText(url);}}}>Compartir</Btn>
+            <Btn small primary color={C.green} onClick={async(e)=>{
+              e.stopPropagation();
+              try{
+                const token=await db.getShareToken(c.id);
+                if(token){
+                  const url=window.location.origin+"/api/client-view?token="+token;
+                  setShareLink(url);
+                  if(navigator.clipboard&&navigator.clipboard.writeText){
+                    navigator.clipboard.writeText(url).catch(()=>{});
+                  }
+                }else{setShareLink("error");}
+              }catch(err){setShareLink("error");}
+            }}>Compartir</Btn>
             <Btn small color={C.red} onClick={(e)=>{e.stopPropagation();deleteClient(c.id);}}>Eliminar</Btn>
           </div>
-          {shareLink&&sel===c.id&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.teal,borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
+          {shareLink&&shareLink!=="error"&&sel===c.id&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.teal,borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:11,color:C.teal,fontWeight:600}}>Enlace copiado:</span>
-            <span style={{fontSize:11,color:C.tx,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{shareLink}</span>
-            <span onClick={()=>window.open(shareLink,"_blank")} style={{fontSize:11,color:C.blue,cursor:"pointer",whiteSpace:"nowrap"}}>Abrir</span>
+            <input readOnly value={shareLink} onClick={e=>{e.stopPropagation();e.target.select();}} style={{fontSize:11,color:C.tx,flex:1,background:"transparent",border:"none",outline:"none",fontFamily:font}}/>
+            <span onClick={(e)=>{e.stopPropagation();window.open(shareLink,"_blank");}} style={{fontSize:11,color:C.blue,cursor:"pointer",whiteSpace:"nowrap"}}>Abrir</span>
           </div>}
-          {lopdView===c.id&&<div style={{marginTop:10,background:C.bg,border:"1px solid "+C.bd,borderRadius:8,padding:16,maxHeight:300,overflowY:"auto"}}>
-            <div style={{fontSize:11,color:C.w,lineHeight:1.7,whiteSpace:"pre-wrap",fontFamily:"monospace"}}>{generateLOPD(c)}</div>
+          {shareLink==="error"&&sel===c.id&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.rose,borderRadius:8}}>
+            <span style={{fontSize:11,color:C.rose}}>Error al generar enlace. Verifica que client-view.js este en api/.</span>
           </div>}
         </div>}
       </div>;
@@ -1737,6 +1986,8 @@ function Clients(){
         })}
       </div>
     </div>}
+
+    {lopdClient&&<LOPDDocument client={lopdClient} onClose={()=>setLopdClient(null)}/>}
   </div>;
 }
 
