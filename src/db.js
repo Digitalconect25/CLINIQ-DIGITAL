@@ -130,5 +130,19 @@ export const db = {
         body: JSON.stringify({ id })
       });
     } catch {}
+  },
+
+  // -- SHARE LINKS --
+  async getShareToken(clientId) {
+    try {
+      const r = await fetch(`${API_BASE}/api/client-view`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId })
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      return data.token;
+    } catch { return null; }
   }
 };
