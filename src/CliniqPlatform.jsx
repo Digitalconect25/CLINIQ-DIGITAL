@@ -1446,44 +1446,35 @@ Busca el negocio, detecta estado real, genera: DIAGNOSTICO EXPRESS, FASE 1 URGEN
 }
 
 /* ══════ LOPD GENERATOR ══════ */
-function LOPDDocument({client,onClose}){
-  const today=new Date().toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"});
+/* ══════ LOPD CHECKBOX (module level) ══════ */
+function LopdChk({checked,onChange,label}){
+  return <div onClick={(e)=>{e.preventDefault();e.stopPropagation();onChange(!checked);}} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 0",cursor:"pointer",userSelect:"none"}}>
+    <div style={{width:22,height:22,borderRadius:4,border:"2px solid "+(checked?C.green:C.bd),background:checked?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all 0.15s"}}>
+      {checked&&<span style={{color:C.bg,fontSize:14,fontWeight:700}}>X</span>}
+    </div>
+    <span style={{fontSize:13,color:C.w,lineHeight:1.5}}>{label}</span>
+  </div>;
+}
+
+/* ══════ LOPD GENERATOR ══════ */
+function LOPDDocument({client,onClose,onSave}){
+  const[docDate,setDocDate]=useState(new Date().toISOString().split("T")[0]);
   const[consent1,setConsent1]=useState(false);
   const[consent2,setConsent2]=useState(false);
   const[consent3,setConsent3]=useState(false);
   const[comercial,setComercial]=useState("autorizo");
-  const[saved,setSaved]=useState(false);
+  const[feedback,setFeedback]=useState("");
 
   const empresa=client.empresa||"Cliniq Digital";
   const cifEmpresa=client.cifEmpresa||"[CIF EMPRESA]";
   const dirEmpresa=client.dirFiscal||"[DIRECCION EMPRESA]";
   const emailEmpresa=client.emailEmpresa||"info@cliniqdigital.com";
-
-  const printDoc=()=>{
-    const w=window.open("","_blank");
-    if(!w) return;
-    w.document.write(buildHTML());
-    w.document.close();
-    setTimeout(()=>w.print(),600);
+  const fmtDate=(val)=>{
+    if(!val) return "_______________";
+    if(val.match(/^\d{4}-\d{2}-\d{2}$/)){try{return new Date(val+"T12:00:00").toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"});}catch(e){}}
+    return val;
   };
-
-  const copyDoc=()=>{
-    const txt=buildPlainText();
-    if(navigator.clipboard&&navigator.clipboard.writeText){
-      navigator.clipboard.writeText(txt).then(()=>setSaved(true)).catch(()=>{
-        fallbackCopy(txt);
-      });
-    }else{fallbackCopy(txt);}
-    setTimeout(()=>setSaved(false),2000);
-  };
-
-  const fallbackCopy=(txt)=>{
-    const ta=document.createElement("textarea");
-    ta.value=txt;ta.style.position="fixed";ta.style.left="-9999px";
-    document.body.appendChild(ta);ta.select();
-    try{document.execCommand("copy");setSaved(true);}catch(e){}
-    document.body.removeChild(ta);
-  };
+  const dateStr=fmtDate(docDate);
 
   const buildPlainText=()=>`DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION
 PROTECCION DE DATOS PERSONALES
@@ -1562,7 +1553,7 @@ ${consent1?"[X]":"[ ]"} CONSIENTO expresamente el tratamiento de mis datos para 
 ${consent2?"[X]":"[ ]"} AUTORIZO la gestion de la presencia digital de mi negocio en las plataformas acordadas.
 ${consent3?"[X]":"[ ]"} ${comercial==="autorizo"?"AUTORIZO":"NO AUTORIZO"} el envio de comunicaciones comerciales sobre servicios propios.
 
-En ${client.ciudadFiscal||"_____________"}, a ${today}.
+En ${client.ciudadFiscal||"_____________"}, a ${dateStr}.
 
 
 
@@ -1581,42 +1572,53 @@ h1{font-size:16px;text-align:center;margin-bottom:4px;letter-spacing:1px}
 h2{font-size:11px;text-align:center;color:#555;margin-bottom:30px;font-weight:400}
 h3{font-size:13px;margin:24px 0 8px;border-bottom:1px solid #ccc;padding-bottom:4px}
 .header{border:2px solid #333;padding:20px 30px;margin-bottom:30px;text-align:center}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;margin:8px 0 16px}
-.grid div{font-size:12px}
-.label{color:#666;font-weight:600}
-.check{margin:6px 0;font-size:12.5px}
 .sig{display:flex;justify-content:space-between;margin-top:60px}
 .sig-box{width:45%;text-align:center}
 .sig-line{border-bottom:1px solid #333;height:50px;margin-bottom:6px}
 .sig-name{font-size:11px;color:#555}
 .footer{text-align:center;margin-top:40px;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:12px}
-@media print{body{padding:30px 50px}button{display:none!important}}
+p{margin:3px 0}
+@media print{body{padding:30px 50px}button,.no-print{display:none!important}}
 </style></head><body>
 <div class="header">
 <h1>DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION</h1>
 <h2>Proteccion de Datos Personales - RGPD (UE 2016/679) y LOPDGDD (LO 3/2018)</h2>
 </div>
-${buildPlainText().split("\n").map(l=>"<p>"+l.replace(/</g,"&lt;")+"</p>").join("")}
-<div class="footer">Documento generado el ${today} - ${empresa}</div>
+${buildPlainText().split("\n").map(l=>"<p>"+(l||"&nbsp;").replace(/</g,"&lt;")+"</p>").join("\n")}
+<div class="footer">Documento generado el ${dateStr} - ${empresa}</div>
+<script>setTimeout(()=>window.print(),500)<\/script>
 </body></html>`;
 
-  const Chk=({checked,onChange,label})=><div onClick={()=>onChange(!checked)} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 0",cursor:"pointer"}}>
-    <div style={{width:20,height:20,borderRadius:4,border:"2px solid "+(checked?C.green:C.bd),background:checked?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1}}>
-      {checked&&<span style={{color:C.bg,fontSize:13,fontWeight:700}}>✓</span>}
-    </div>
-    <span style={{fontSize:13,color:C.w,lineHeight:1.5}}>{label}</span>
-  </div>;
+  const printDoc=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(buildHTML());w.document.close();};
 
-  return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.85)",zIndex:9999,overflowY:"auto",padding:"20px"}}>
+  const downloadPDF=()=>{printDoc();};
+
+  const copyDoc=()=>{
+    const txt=buildPlainText();
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(()=>{setFeedback("Copiado!");setTimeout(()=>setFeedback(""),2000);}).catch(()=>fbCopy(txt));
+    }else{fbCopy(txt);}
+  };
+  const fbCopy=(txt)=>{const ta=document.createElement("textarea");ta.value=txt;ta.style.cssText="position:fixed;left:-9999px";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");setFeedback("Copiado!");}catch(e){}document.body.removeChild(ta);setTimeout(()=>setFeedback(""),2000);};
+
+  const saveDoc=()=>{
+    if(onSave) onSave(buildPlainText());
+    setFeedback("Guardado en biblioteca!");
+    setTimeout(()=>setFeedback(""),2500);
+  };
+
+  return <div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.85)",zIndex:9999,overflowY:"auto",padding:"20px"}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
     <div style={{maxWidth:800,margin:"0 auto",background:C.sf,border:"1px solid "+C.bd,borderRadius:14,overflow:"hidden"}}>
-      <div style={{padding:"20px 24px",borderBottom:"1px solid "+C.bd,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:C.sf,zIndex:1}}>
+      <div style={{padding:"16px 24px",borderBottom:"1px solid "+C.bd,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,position:"sticky",top:0,background:C.sf,zIndex:1}}>
         <div>
           <h3 style={{fontSize:16,fontWeight:700,color:C.w,margin:0}}>Documento LOPD / RGPD</h3>
-          <p style={{fontSize:12,color:C.txD,margin:"2px 0 0"}}>{client.nombre} - {today}</p>
+          <p style={{fontSize:12,color:C.txD,margin:"2px 0 0"}}>{client.nombre}</p>
         </div>
-        <div style={{display:"flex",gap:8}}>
-          <Btn small primary color={C.green} onClick={copyDoc}>{saved?"Copiado!":"Copiar"}</Btn>
-          <Btn small primary color={C.blue} onClick={printDoc}>Imprimir</Btn>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          {feedback&&<span style={{fontSize:11,color:C.green,fontWeight:600}}>{feedback}</span>}
+          <Btn small primary color={C.gold} onClick={saveDoc}>Guardar</Btn>
+          <Btn small primary color={C.green} onClick={copyDoc}>Copiar</Btn>
+          <Btn small primary color={C.blue} onClick={downloadPDF}>Imprimir / PDF</Btn>
           <Btn small onClick={onClose}>Cerrar</Btn>
         </div>
       </div>
@@ -1651,50 +1653,50 @@ ${buildPlainText().split("\n").map(l=>"<p>"+l.replace(/</g,"&lt;")+"</p>").join(
         </Crd>
 
         <Crd sx={{marginBottom:16}}>
-          <h4 style={{fontSize:13,fontWeight:700,color:C.purple,margin:"0 0 10px"}}>3. FINALIDAD DEL TRATAMIENTO</h4>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.purple,margin:"0 0 10px"}}>3-4. FINALIDAD Y BASE JURIDICA</h4>
           <div style={{fontSize:13,color:C.tx,lineHeight:1.7}}>
-            <p style={{marginBottom:6}}>Los datos personales seran tratados para:</p>
             <p>a) Gestion de la relacion contractual (Plan: <span style={{color:C.w,fontWeight:600}}>{client.plan||"-"}</span>)</p>
-            <p>b) Facturacion y cobro de los servicios contratados</p>
-            <p>c) Gestion de presencia digital y reputacion online</p>
+            <p>b) Facturacion y cobro de servicios</p>
+            <p>c) Presencia digital y reputacion online</p>
             <p>d) Creacion y gestion de contenido digital</p>
-            <p>e) Comunicaciones relacionadas con el servicio</p>
+            <p>e) Comunicaciones de servicio</p>
+            <p style={{marginTop:8,fontSize:12,color:C.txD}}>Base: Art. 6.1.b) contrato, Art. 6.1.a) consentimiento, Art. 6.1.c) obligacion legal</p>
           </div>
         </Crd>
 
         <Crd sx={{marginBottom:16}}>
-          <h4 style={{fontSize:13,fontWeight:700,color:C.gold,margin:"0 0 10px"}}>4. BASE JURIDICA</h4>
-          <div style={{fontSize:13,color:C.tx,lineHeight:1.7}}>
-            <p>Art. 6.1.b) RGPD - Ejecucion de contrato</p>
-            <p>Art. 6.1.a) RGPD - Consentimiento del interesado</p>
-            <p>Art. 6.1.c) RGPD - Cumplimiento de obligaciones legales</p>
-          </div>
-        </Crd>
-
-        <Crd sx={{marginBottom:16}}>
-          <h4 style={{fontSize:13,fontWeight:700,color:C.cyan,margin:"0 0 10px"}}>5. CONSERVACION / 6. DESTINATARIOS / 7. DERECHOS</h4>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.cyan,margin:"0 0 10px"}}>5-7. CONSERVACION, DESTINATARIOS Y DERECHOS</h4>
           <div style={{fontSize:12,color:C.tx,lineHeight:1.7}}>
-            <p><span style={{color:C.w,fontWeight:600}}>Conservacion:</span> Vigencia contractual + plazos legales (4 anos fiscal, 5 anos contractual, 3 anos datos personales)</p>
-            <p style={{marginTop:6}}><span style={{color:C.w,fontWeight:600}}>Destinatarios:</span> Administraciones publicas (obligacion legal), proveedores tecnologicos. Sin transferencias fuera del EEE.</p>
-            <p style={{marginTop:6}}><span style={{color:C.w,fontWeight:600}}>Derechos:</span> Acceso, rectificacion, supresion, limitacion, portabilidad, oposicion. Ejercicio: {emailEmpresa}. Plazo: 1 mes. Reclamaciones: AEPD (www.aepd.es)</p>
+            <p><span style={{color:C.w,fontWeight:600}}>Conservacion:</span> Vigencia contractual + plazos legales (4a fiscal, 5a contractual, 3a datos personales)</p>
+            <p style={{marginTop:4}}><span style={{color:C.w,fontWeight:600}}>Destinatarios:</span> Administraciones publicas, proveedores tecnologicos. Sin transferencias fuera del EEE.</p>
+            <p style={{marginTop:4}}><span style={{color:C.w,fontWeight:600}}>Derechos:</span> Acceso, rectificacion, supresion, limitacion, portabilidad, oposicion. Ejercicio: {emailEmpresa}. Reclamaciones: AEPD (www.aepd.es)</p>
           </div>
         </Crd>
 
-        <Crd sx={{marginBottom:16,borderColor:C.teal}}>
+        <Crd sx={{marginBottom:16,border:"2px solid "+C.teal}}>
           <h4 style={{fontSize:13,fontWeight:700,color:C.green,margin:"0 0 12px"}}>8. CONSENTIMIENTO</h4>
           <p style={{fontSize:13,color:C.tx,marginBottom:12}}>D./Da. <span style={{color:C.w,fontWeight:600}}>{client.contacto||client.nombre||"_________"}</span>, con NIF <span style={{color:C.w,fontWeight:600}}>{client.nif||"_________"}</span>, en calidad de {client.cargoContacto||"representante legal"} de <span style={{color:C.w,fontWeight:600}}>{client.nombre||"_________"}</span>:</p>
-          <Chk checked={consent1} onChange={setConsent1} label="CONSIENTO expresamente el tratamiento de mis datos personales para las finalidades descritas en el apartado 3."/>
-          <Chk checked={consent2} onChange={setConsent2} label="AUTORIZO la gestion de la presencia digital de mi negocio en las plataformas acordadas."/>
+          <LopdChk checked={consent1} onChange={setConsent1} label="CONSIENTO expresamente el tratamiento de mis datos personales para las finalidades descritas."/>
+          <LopdChk checked={consent2} onChange={setConsent2} label="AUTORIZO la gestion de la presencia digital de mi negocio en las plataformas acordadas."/>
           <div style={{marginTop:8,marginBottom:4}}>
             <Fld label="Comunicaciones comerciales">
-              <Sel value={comercial} onChange={setComercial} opts={[{v:"autorizo",l:"AUTORIZO el envio de comunicaciones comerciales"},{v:"no_autorizo",l:"NO AUTORIZO el envio de comunicaciones comerciales"}]}/>
+              <Sel value={comercial} onChange={setComercial} opts={[{v:"autorizo",l:"AUTORIZO comunicaciones comerciales"},{v:"no_autorizo",l:"NO AUTORIZO comunicaciones comerciales"}]}/>
             </Fld>
           </div>
-          <Chk checked={consent3} onChange={setConsent3} label={comercial==="autorizo"?"AUTORIZO el envio de comunicaciones comerciales sobre servicios propios.":"NO AUTORIZO el envio de comunicaciones comerciales."}/>
+          <LopdChk checked={consent3} onChange={setConsent3} label={comercial==="autorizo"?"AUTORIZO el envio de comunicaciones comerciales sobre servicios propios.":"NO AUTORIZO el envio de comunicaciones comerciales."}/>
         </Crd>
 
         <Crd sx={{marginBottom:16}}>
-          <p style={{fontSize:13,color:C.tx,marginBottom:20}}>En <span style={{color:C.w,fontWeight:600}}>{client.ciudadFiscal||"_____________"}</span>, a <span style={{color:C.w,fontWeight:600}}>{today}</span>.</p>
+          <div style={{marginBottom:20}}>
+            <Fld label="Fecha del documento">
+              <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                <span style={{fontSize:13,color:C.tx}}>En <span style={{color:C.w,fontWeight:600}}>{client.ciudadFiscal||"_____________"}</span>, a</span>
+                <input type="text" value={docDate} onChange={e=>setDocDate(e.target.value)} placeholder="28/02/2026" style={{background:C.sf,border:"1px solid "+C.teal,color:C.w,padding:"8px 12px",borderRadius:6,fontFamily:font,fontSize:14,fontWeight:600,outline:"none",width:160,textAlign:"center"}}/>
+                <input type="date" value={docDate.includes("-")?docDate:""} onChange={e=>setDocDate(e.target.value)} style={{background:C.sf,border:"1px solid "+C.bd,color:C.w,padding:"6px 8px",borderRadius:6,fontFamily:font,fontSize:12,outline:"none",width:40,cursor:"pointer",opacity:0.6}} title="Selector de fecha"/>
+              </div>
+            </Fld>
+            <p style={{fontSize:11,color:C.txD,marginTop:4}}>Escribe la fecha directamente o usa el selector. Aparece en el documento como: <span style={{color:C.teal}}>{dateStr}</span></p>
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:40}}>
             <div style={{textAlign:"center"}}>
               <p style={{fontSize:11,color:C.txD,marginBottom:8}}>Firma del cliente</p>
@@ -1715,8 +1717,8 @@ ${buildPlainText().split("\n").map(l=>"<p>"+l.replace(/</g,"&lt;")+"</p>").join(
           </div>
         </Crd>
 
-        <div style={{textAlign:"center",padding:"16px",fontSize:11,color:C.txD}}>
-          Documento generado el {today} - {empresa}
+        <div style={{textAlign:"center",padding:16,fontSize:11,color:C.txD}}>
+          Documento generado el {dateStr} - {empresa}
         </div>
       </div>
     </div>
@@ -1747,6 +1749,7 @@ function Clients(){
   const[logToolFilter,setLogToolFilter]=useState("all");
   const[shareLink,setShareLink]=useState("");
   const[lopdClient,setLopdClient]=useState(null);
+  const[clientSearch,setClientSearch]=useState("");
 
   useEffect(()=>{
     db.getClients().then(data=>{
@@ -1764,8 +1767,14 @@ function Clients(){
     }).catch(()=>{});
   },[]);
 
+  const updF=(key,val)=>setF(prev=>({...prev,[key]:val}));
+
+  const[saveError,setSaveError]=useState("");
+
   const save=()=>{
-    if(!f.nombre||!f.nif) return;
+    if(!f.nombre){setSaveError("Falta el nombre del cliente");return;}
+    if(!f.nif){setSaveError("Falta el NIF/CIF");return;}
+    setSaveError("");
     if(editId){
       setCls(prev=>prev.map(c=>c.id===editId?{...f,id:editId}:c));
       db.updateClient&&db.updateClient(editId,f).catch(()=>{});
@@ -1797,135 +1806,190 @@ function Clients(){
     db.clearActivity&&db.clearActivity().catch(()=>{});
     forceUpdate(n=>n+1);
   };
+  const saveLOPD=(text)=>{
+    logActivity("LOPD / Proteccion de Datos",lopdClient?lopdClient.nombre:"Sin asignar",{tipo:"LOPD",fecha:new Date().toISOString()},text,{provider:"manual",model:"lopd"});
+    forceUpdate(n=>n+1);
+  };
 
   const allLog=ACTIVITY_LOG;
   const filteredLog=logFilter==="all"?allLog:getLogForClient(logFilter);
   const clientNames=[...new Set(allLog.map(e=>e.client))].filter(n=>n!=="Sin asignar");
+  const filteredCls=clientSearch?cls.filter(c=>
+    (c.nombre||"").toLowerCase().includes(clientSearch.toLowerCase())||
+    (c.nicho||"").toLowerCase().includes(clientSearch.toLowerCase())||
+    (c.ciudadFiscal||"").toLowerCase().includes(clientSearch.toLowerCase())||
+    (c.email||"").toLowerCase().includes(clientSearch.toLowerCase())
+  ):cls;
 
-  const ClientFormJSX=<Crd sx={{marginBottom:20}}>
-    <h4 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 16px"}}>{editId?"Editar Cliente":"Nuevo Cliente"}</h4>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:16}}>
-      <Fld label="Nombre / Razón Social *"><Inp value={f.nombre} onChange={v=>setF({...f,nombre:v})} ph="Nombre"/></Fld>
-      <Fld label="NIF / CIF *"><Inp value={f.nif} onChange={v=>setF({...f,nif:v})} ph="B12345678"/></Fld>
-      <Fld label="Dirección Fiscal"><Inp value={f.dirFiscal} onChange={v=>setF({...f,dirFiscal:v})} ph="C/ Mayor 15"/></Fld>
-      <Fld label="CP"><Inp value={f.cpFiscal} onChange={v=>setF({...f,cpFiscal:v})} ph="03001"/></Fld>
-      <Fld label="Ciudad"><Inp value={f.ciudadFiscal} onChange={v=>setF({...f,ciudadFiscal:v})} ph="Alicante"/></Fld>
-      <Fld label="Provincia"><Inp value={f.provinciaFiscal} onChange={v=>setF({...f,provinciaFiscal:v})} ph="Alicante"/></Fld>
-      <Fld label="Email"><Inp value={f.email} onChange={v=>setF({...f,email:v})} ph="info@clinica.es"/></Fld>
-      <Fld label="Teléfono"><Inp value={f.telefono} onChange={v=>setF({...f,telefono:v})} ph="+34 600 000 000"/></Fld>
-      <Fld label="Web"><Inp value={f.web} onChange={v=>setF({...f,web:v})} ph="www.clinica.es"/></Fld>
-      <Fld label="Contacto"><Inp value={f.contacto} onChange={v=>setF({...f,contacto:v})} ph="Nombre responsable"/></Fld>
-      <Fld label="Nicho"><Sel value={f.nicho} onChange={v=>setF({...f,nicho:v})} opts={NICHES.map(n=>n.lb)} ph="Sector..."/></Fld>
-      <Fld label="Plan"><Sel value={f.plan} onChange={v=>setF({...f,plan:v})} opts={PLANS.map(p=>({value:p.lb,label:`${p.lb} (${p.price} EUR)`}))}/></Fld>
-      <Fld label="Presupuesto total (EUR)"><Inp value={f.presupuesto} onChange={v=>setF({...f,presupuesto:v})} ph="Ej: 3000"/></Fld>
-      <Fld label="Cuota mensual (EUR)"><Inp value={f.cuotaMensual} onChange={v=>setF({...f,cuotaMensual:v})} ph="Ej: 497"/></Fld>
-      <Fld label="Forma pago"><Sel value={f.formaPago} onChange={v=>setF({...f,formaPago:v})} opts={["Transferencia","Domiciliación","Tarjeta","Efectivo"]}/></Fld>
-      <Fld label="Fecha alta"><Inp value={f.fechaAlta} onChange={v=>setF({...f,fechaAlta:v})} type="date"/></Fld>
-    </div>
-    <Fld label="Servicios contratados"><Txa value={f.servicios} onChange={v=>setF({...f,servicios:v})} ph="SEO local, redes sociales, Google Ads..." rows={2}/></Fld>
-    <Fld label="Notas"><Txa value={f.notas} onChange={v=>setF({...f,notas:v})} ph="Observaciones..." rows={2}/></Fld>
-    <div style={{marginTop:12,display:"flex",gap:10}}>
-      <Btn primary small onClick={save}>{editId?"Actualizar":"Guardar"}</Btn>
-      <Btn small onClick={()=>{setShow(false);setEditId(null);setF({...emptyClient});}}>Cancelar</Btn>
-    </div>
-  </Crd>;
+  const totalMRR=cls.reduce((s,c)=>s+parseFloat(c.cuotaMensual||0),0);
 
   return <div>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:12}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:12}}>
       <div>
-        <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:0}}>Gestión de Clientes</h3>
-        <p style={{fontSize:13,color:C.tx,margin:"4px 0 0"}}>{cls.length} clientes - {allLog.length} consultas</p>
+        <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:0}}>Gestion de Clientes</h3>
+        <p style={{fontSize:13,color:C.tx,margin:"4px 0 0"}}>{cls.length} clientes - {totalMRR>0?totalMRR.toFixed(0)+" EUR/mes MRR - ":""}{allLog.length} contenidos generados</p>
       </div>
-      <Btn primary onClick={()=>{setShow(!show);setSel(null);setEditId(null);setF({...emptyClient});}}>+ Nuevo Cliente</Btn>
+      <Btn primary onClick={()=>{setShow(true);setSel(null);setEditId(null);setF({...emptyClient});}}>+ Nuevo Cliente</Btn>
     </div>
 
-    <Tab tabs={[{id:"list",lb:"Clientes"},{id:"log",lb:"Biblioteca ("+allLog.length+")"},{id:"logclient",lb:"Log por Cliente"}]} active={tab} onChange={setTab}/>
+    <Tab tabs={[{id:"list",lb:"Clientes ("+cls.length+")"},{id:"log",lb:"Biblioteca ("+allLog.length+")"},{id:"logclient",lb:"Log por Cliente"}]} active={tab} onChange={setTab}/>
 
-    {tab==="list"&&show&&ClientFormJSX}
+    {tab==="list"&&show&&<Crd sx={{marginBottom:20}}>
+      <h4 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 16px"}}>{editId?"Editar Cliente":"Nuevo Cliente"}</h4>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:16}}>
+        <Fld label="Nombre / Razon Social *"><Inp value={f.nombre} onChange={v=>updF("nombre",v)} ph="Nombre"/></Fld>
+        <Fld label="NIF / CIF *"><Inp value={f.nif} onChange={v=>updF("nif",v)} ph="B12345678"/></Fld>
+        <Fld label="Direccion Fiscal"><Inp value={f.dirFiscal} onChange={v=>updF("dirFiscal",v)} ph="C/ Mayor 15"/></Fld>
+        <Fld label="CP"><Inp value={f.cpFiscal} onChange={v=>updF("cpFiscal",v)} ph="03001"/></Fld>
+        <Fld label="Ciudad"><Inp value={f.ciudadFiscal} onChange={v=>updF("ciudadFiscal",v)} ph="Alicante"/></Fld>
+        <Fld label="Provincia"><Inp value={f.provinciaFiscal} onChange={v=>updF("provinciaFiscal",v)} ph="Alicante"/></Fld>
+        <Fld label="Email"><Inp value={f.email} onChange={v=>updF("email",v)} ph="info@clinica.es"/></Fld>
+        <Fld label="Telefono"><Inp value={f.telefono} onChange={v=>updF("telefono",v)} ph="+34 600 000 000"/></Fld>
+        <Fld label="Web"><Inp value={f.web} onChange={v=>updF("web",v)} ph="www.clinica.es"/></Fld>
+        <Fld label="Contacto"><Inp value={f.contacto} onChange={v=>updF("contacto",v)} ph="Nombre responsable"/></Fld>
+        <Fld label="Cargo contacto"><Inp value={f.cargoContacto} onChange={v=>updF("cargoContacto",v)} ph="Director/a, Gerente..."/></Fld>
+        <Fld label="Nicho"><Sel value={f.nicho} onChange={v=>updF("nicho",v)} opts={NICHES.map(n=>n.lb)} ph="Sector..."/></Fld>
+        <Fld label="Plan"><Sel value={f.plan} onChange={v=>updF("plan",v)} opts={PLANS.map(p=>({value:p.lb,label:p.lb+" ("+p.price+" EUR)"}))}/></Fld>
+        <Fld label="Presupuesto total (EUR)"><Inp value={f.presupuesto} onChange={v=>updF("presupuesto",v)} ph="Ej: 3000"/></Fld>
+        <Fld label="Cuota mensual (EUR)"><Inp value={f.cuotaMensual} onChange={v=>updF("cuotaMensual",v)} ph="Ej: 497"/></Fld>
+        <Fld label="Forma pago"><Sel value={f.formaPago} onChange={v=>updF("formaPago",v)} opts={["Transferencia","Domiciliacion","Tarjeta","Efectivo"]}/></Fld>
+        <Fld label="Fecha alta"><Inp value={f.fechaAlta} onChange={v=>updF("fechaAlta",v)} type="date"/></Fld>
+        <Fld label="Empresa (responsable LOPD)"><Inp value={f.empresa} onChange={v=>updF("empresa",v)} ph="Cliniq Digital"/></Fld>
+        <Fld label="CIF empresa"><Inp value={f.cifEmpresa} onChange={v=>updF("cifEmpresa",v)} ph="B12345678"/></Fld>
+        <Fld label="Email empresa"><Inp value={f.emailEmpresa} onChange={v=>updF("emailEmpresa",v)} ph="info@cliniqdigital.com"/></Fld>
+      </div>
+      <Fld label="Servicios contratados"><Txa value={f.servicios} onChange={v=>updF("servicios",v)} ph="SEO local, redes sociales, Google Ads..." rows={2}/></Fld>
+      <div style={{marginTop:8}}><Fld label="Notas"><Txa value={f.notas} onChange={v=>updF("notas",v)} ph="Observaciones..." rows={2}/></Fld></div>
+      <div style={{marginTop:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+        <Btn primary onClick={save}>{editId?"Actualizar Cliente":"Guardar Cliente"}</Btn>
+        <Btn onClick={()=>{setShow(false);setEditId(null);setF({...emptyClient});setSaveError("");}}>Cancelar</Btn>
+        {saveError&&<span style={{fontSize:12,color:C.red,fontWeight:600}}>{saveError}</span>}
+      </div>
+    </Crd>}
 
-    {tab==="list"&&cls.map(c=>{
+    {tab==="list"&&!show&&cls.length>0&&<div style={{marginBottom:12}}>
+      <Inp value={clientSearch} onChange={setClientSearch} ph={"Buscar entre "+cls.length+" clientes (nombre, sector, ciudad, email)..."}/>
+    </div>}
+
+    {tab==="list"&&filteredCls.map(c=>{
       const clientLog=getLogForClient(c.nombre);
-      return <div key={c.id} style={{background:sel===c.id?C.sf2:C.sf,border:"1px solid "+(sel===c.id?C.teal:C.bd),borderRadius:10,padding:"14px 20px",marginBottom:8,cursor:"pointer"}} onClick={()=>setSel(sel===c.id?null:c.id)}>
+      const toolsUsed=[...new Set(clientLog.map(e=>e.tool))];
+      return <div key={c.id} style={{background:sel===c.id?C.sf2:C.sf,border:"1px solid "+(sel===c.id?C.teal:C.bd),borderRadius:10,padding:"14px 20px",marginBottom:8,cursor:"pointer"}} onClick={()=>{setSel(sel===c.id?null:c.id);setShareLink("");}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
-            <div style={{width:38,height:38,borderRadius:8,background:bg8(C.teal),display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:C.teal}}>{c.nombre[0]}</div>
+            <div style={{width:38,height:38,borderRadius:8,background:bg8(C.teal),display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:C.teal}}>{(c.nombre||"?")[0]}</div>
             <div>
               <div style={{fontSize:14,fontWeight:600,color:C.w}}>{c.nombre}</div>
-              <div style={{fontSize:12,color:C.tx}}>{mask(c.nif)} - {c.ciudadFiscal||c.email}</div>
+              <div style={{fontSize:12,color:C.tx}}>{c.ciudadFiscal||c.email||mask(c.nif)}</div>
             </div>
           </div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
             <Badge text={c.nicho||"Sin sector"} color={C.purple}/>
             <Badge text={c.plan} color={c.plan==="Premium"?C.gold:c.plan==="Profesional"?C.blue:C.teal}/>
             {c.cuotaMensual&&<Badge text={c.cuotaMensual+" EUR/mes"} color={C.green}/>}
-            {clientLog.length>0&&<Badge text={clientLog.length+" consultas"} color={C.cyan}/>}
+            {clientLog.length>0&&<Badge text={clientLog.length+" contenidos"} color={C.cyan}/>}
           </div>
         </div>
-        {sel===c.id&&<div style={{marginTop:16,paddingTop:16,borderTop:"1px solid "+C.bd}}>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,fontSize:13,marginBottom:12}}>
-            <div><span style={{color:C.txD}}>NIF/CIF:</span> <span style={{color:C.w}}>{mask(c.nif)}</span></div>
-            <div><span style={{color:C.txD}}>Email:</span> <span style={{color:C.w}}>{c.email||"-"}</span></div>
-            <div><span style={{color:C.txD}}>Tel:</span> <span style={{color:C.w}}>{mask(c.telefono)}</span></div>
-            <div><span style={{color:C.txD}}>Web:</span> <span style={{color:C.w}}>{c.web||"-"}</span></div>
-            <div><span style={{color:C.txD}}>Plan:</span> <span style={{color:C.w}}>{c.plan}</span></div>
-            <div><span style={{color:C.txD}}>Cuota:</span> <span style={{color:C.green}}>{c.cuotaMensual?c.cuotaMensual+" EUR/mes":"-"}</span></div>
-            <div><span style={{color:C.txD}}>Presupuesto:</span> <span style={{color:C.gold}}>{c.presupuesto?c.presupuesto+" EUR":"-"}</span></div>
-            <div><span style={{color:C.txD}}>Pago:</span> <span style={{color:C.w}}>{c.formaPago||"-"}</span></div>
-            <div><span style={{color:C.txD}}>Alta:</span> <span style={{color:C.w}}>{c.fechaAlta||"-"}</span></div>
-            <div><span style={{color:C.txD}}>Contacto:</span> <span style={{color:C.w}}>{c.contacto||"-"}</span></div>
-            {c.servicios&&<div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Servicios:</span> <span style={{color:C.w}}>{c.servicios}</span></div>}
-            {c.notas&&<div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Notas:</span> <span style={{color:C.w}}>{c.notas}</span></div>}
+        {sel===c.id&&<div style={{marginTop:16,paddingTop:16,borderTop:"1px solid "+C.bd}} onClick={e=>e.stopPropagation()}>
+          <div style={{background:C.bg,borderRadius:10,padding:16,marginBottom:14}}>
+            <p style={{fontSize:11,color:C.teal,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Datos completos</p>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,fontSize:13}}>
+              <div><span style={{color:C.txD}}>NIF/CIF:</span> <span style={{color:C.w}}>{c.nif}</span></div>
+              <div><span style={{color:C.txD}}>Email:</span> <span style={{color:C.w}}>{c.email||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Telefono:</span> <span style={{color:C.w}}>{c.telefono||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Web:</span> <span style={{color:C.w}}>{c.web||"-"}</span></div>
+              <div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Direccion fiscal:</span> <span style={{color:C.w}}>{c.dirFiscal||"-"}, {c.cpFiscal||""} {c.ciudadFiscal||"-"} ({c.provinciaFiscal||""})</span></div>
+              <div><span style={{color:C.txD}}>Contacto:</span> <span style={{color:C.w}}>{c.contacto||"-"} {c.cargoContacto?"("+c.cargoContacto+")":""}</span></div>
+              <div><span style={{color:C.txD}}>Sector:</span> <span style={{color:C.purple}}>{c.nicho||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Plan:</span> <span style={{color:C.w}}>{c.plan}</span></div>
+              <div><span style={{color:C.txD}}>Cuota mensual:</span> <span style={{color:C.green}}>{c.cuotaMensual?c.cuotaMensual+" EUR/mes":"-"}</span></div>
+              <div><span style={{color:C.txD}}>Presupuesto total:</span> <span style={{color:C.gold}}>{c.presupuesto?c.presupuesto+" EUR":"-"}</span></div>
+              <div><span style={{color:C.txD}}>Forma de pago:</span> <span style={{color:C.w}}>{c.formaPago||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Fecha de alta:</span> <span style={{color:C.w}}>{c.fechaAlta||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Empresa (LOPD):</span> <span style={{color:C.w}}>{c.empresa||"-"}</span></div>
+              <div><span style={{color:C.txD}}>CIF empresa:</span> <span style={{color:C.w}}>{c.cifEmpresa||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Email empresa:</span> <span style={{color:C.w}}>{c.emailEmpresa||"-"}</span></div>
+              {c.servicios&&<div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Servicios contratados:</span> <span style={{color:C.w}}>{c.servicios}</span></div>}
+              {c.notas&&<div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Notas:</span> <span style={{color:C.w}}>{c.notas}</span></div>}
+            </div>
           </div>
+
+          {toolsUsed.length>0&&<div style={{background:C.bg,borderRadius:10,padding:16,marginBottom:14}}>
+            <p style={{fontSize:11,color:C.cyan,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Herramientas usadas ({clientLog.length} contenidos generados)</p>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {toolsUsed.map(t=>{const cnt=clientLog.filter(e=>e.tool===t).length;return <span key={t} style={{fontSize:10,padding:"4px 10px",borderRadius:4,background:bg8(C.cyan),color:C.cyan,fontWeight:600}}>{t} ({cnt})</span>;})}
+            </div>
+            {(()=>{const topics=[...new Set(clientLog.map(e=>(e.inputs&&typeof e.inputs==="object"?Object.values(e.inputs).filter(v=>typeof v==="string"&&v.length>2&&v.length<50):[]).flat()).flat())].filter(t=>t&&t.length>2).slice(0,15);
+              return topics.length>0?<div style={{marginTop:10}}>
+                <p style={{fontSize:10,color:C.txD,fontWeight:600,marginBottom:4}}>TEMAS TRABAJADOS</p>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {topics.map((t,i)=><span key={i} style={{fontSize:10,padding:"2px 8px",borderRadius:3,background:bg8(C.purple),color:C.purple}}>{t}</span>)}
+                </div>
+              </div>:null;
+            })()}
+          </div>}
+
+          {clientLog.length>0&&<div style={{background:C.bg,borderRadius:10,padding:16,marginBottom:14}}>
+            <p style={{fontSize:11,color:C.gold,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Ultimos trabajos realizados</p>
+            {clientLog.slice(-8).reverse().map((e,i)=>{
+              const d=new Date(e.date);
+              return <div key={i} style={{padding:"6px 10px",background:C.sf,borderRadius:6,marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{display:"flex",gap:8,alignItems:"center",flex:1,minWidth:0}}>
+                  <span style={{fontSize:10,fontWeight:700,color:C.bg,background:C.cyan,padding:"1px 6px",borderRadius:3,whiteSpace:"nowrap"}}>{e.tool}</span>
+                  <span style={{fontSize:11,color:C.tx,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(e.preview||"").slice(0,100)}</span>
+                </div>
+                <span style={{fontSize:10,color:C.txD,whiteSpace:"nowrap",marginLeft:8}}>{d.toLocaleDateString("es-ES")}</span>
+              </div>;
+            })}
+            {clientLog.length>8&&<p style={{fontSize:10,color:C.txD,marginTop:4}}>...y {clientLog.length-8} mas. Ver todo en pestana "Biblioteca".</p>}
+          </div>}
+
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <Btn small primary color={C.blue} onClick={(e)=>{e.stopPropagation();startEdit(c);}}>Editar</Btn>
-            <Btn small primary color={C.teal} onClick={(e)=>{e.stopPropagation();setLopdClient(c);}}>LOPD</Btn>
-            {clientLog.length>0&&<Btn small primary color={C.cyan} onClick={(e)=>{e.stopPropagation();exportLogPDF(clientLog,c.nombre);}}>Log PDF</Btn>}
-            <Btn small primary color={C.green} onClick={async(e)=>{
-              e.stopPropagation();
+            <Btn small primary color={C.blue} onClick={()=>startEdit(c)}>Editar</Btn>
+            <Btn small primary color={C.teal} onClick={()=>setLopdClient(c)}>LOPD</Btn>
+            {clientLog.length>0&&<Btn small primary color={C.cyan} onClick={()=>exportLogPDF(clientLog,c.nombre)}>Log PDF</Btn>}
+            <Btn small primary color={C.green} onClick={async()=>{
               try{
                 const token=await db.getShareToken(c.id);
                 if(token){
                   const url=window.location.origin+"/api/client-view?token="+token;
                   setShareLink(url);
-                  if(navigator.clipboard&&navigator.clipboard.writeText){
-                    navigator.clipboard.writeText(url).catch(()=>{});
-                  }
+                  try{await navigator.clipboard.writeText(url);}catch(e){}
                 }else{setShareLink("error");}
               }catch(err){setShareLink("error");}
             }}>Compartir</Btn>
-            <Btn small color={C.red} onClick={(e)=>{e.stopPropagation();deleteClient(c.id);}}>Eliminar</Btn>
+            <Btn small color={C.red} onClick={()=>deleteClient(c.id)}>Eliminar</Btn>
           </div>
-          {shareLink&&shareLink!=="error"&&sel===c.id&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.teal,borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:11,color:C.teal,fontWeight:600}}>Enlace copiado:</span>
-            <input readOnly value={shareLink} onClick={e=>{e.stopPropagation();e.target.select();}} style={{fontSize:11,color:C.tx,flex:1,background:"transparent",border:"none",outline:"none",fontFamily:font}}/>
-            <span onClick={(e)=>{e.stopPropagation();window.open(shareLink,"_blank");}} style={{fontSize:11,color:C.blue,cursor:"pointer",whiteSpace:"nowrap"}}>Abrir</span>
+          {shareLink&&shareLink!=="error"&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.teal,borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:11,color:C.teal,fontWeight:600}}>Enlace:</span>
+            <input readOnly value={shareLink} onClick={e=>e.target.select()} style={{fontSize:11,color:C.tx,flex:1,background:"transparent",border:"none",outline:"none",fontFamily:font}}/>
+            <span onClick={()=>window.open(shareLink,"_blank")} style={{fontSize:11,color:C.blue,cursor:"pointer"}}>Abrir</span>
           </div>}
-          {shareLink==="error"&&sel===c.id&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.rose,borderRadius:8}}>
+          {shareLink==="error"&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.rose,borderRadius:8}}>
             <span style={{fontSize:11,color:C.rose}}>Error al generar enlace. Verifica que client-view.js este en api/.</span>
           </div>}
         </div>}
       </div>;
     })}
-    {tab==="list"&&cls.length===0&&!show&&<Crd sx={{textAlign:"center",padding:40}}>
-      <p style={{color:C.txD,fontSize:14}}>No hay clientes. Pulsa "+ Nuevo Cliente".</p>
+    {tab==="list"&&filteredCls.length===0&&!show&&<Crd sx={{textAlign:"center",padding:40}}>
+      <p style={{color:C.txD,fontSize:14}}>{clientSearch?"Sin resultados para \""+clientSearch+"\"":"No hay clientes. Pulsa \"+ Nuevo Cliente\"."}</p>
     </Crd>}
 
     {tab==="log"&&<div>
       <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
-        <Inp value={logSearch} onChange={setLogSearch} ph="Buscar en contenido..." style={{flex:1,minWidth:200}}/>
+        <Inp value={logSearch} onChange={setLogSearch} ph="Buscar en contenido..."/>
         <Sel value={logToolFilter} onChange={setLogToolFilter}
-          opts={[{v:"all",l:"Todas las herramientas"},...[...new Set(allLog.map(e=>e.tool))].sort().map(t=>({v:t,l:t}))]}
-          style={{maxWidth:220}}/>
+          opts={[{v:"all",l:"Todas las herramientas"},...[...new Set(allLog.map(e=>e.tool))].sort().map(t=>({v:t,l:t}))]}/>
       </div>
       <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
         <Btn small primary color={C.cyan} onClick={()=>exportLogPDF(allLog,"Todos")}>Exportar PDF</Btn>
         {allLog.length>0&&<Btn small color={C.red} onClick={clearAllLogs}>Borrar todo</Btn>}
         <span style={{fontSize:11,color:C.txD,marginLeft:"auto"}}>
-          {(()=>{const f=allLog.filter(e=>{
+          {(()=>{const f2=allLog.filter(e=>{
             if(logToolFilter!=="all"&&e.tool!==logToolFilter) return false;
             if(logSearch&&!(e.fullOutput||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.tool||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.client||"").toLowerCase().includes(logSearch.toLowerCase())) return false;
             return true;
-          });return f.length+" de "+allLog.length+" contenidos";})()}
+          });return f2.length+" de "+allLog.length+" contenidos";})()}
         </span>
       </div>
       {allLog.length===0?<Crd sx={{textAlign:"center",padding:30}}><p style={{color:C.txD}}>Sin contenido generado. Usa cualquier herramienta para empezar tu biblioteca.</p></Crd>
@@ -1957,7 +2021,7 @@ function Clients(){
           </div>:<div>
             <div style={{fontSize:12,color:C.tx,lineHeight:1.5,maxHeight:60,overflow:"hidden"}}>{e.preview}</div>
             <div style={{display:"flex",gap:6,marginTop:6}}>
-              <Btn small onClick={()=>navigator.clipboard.writeText(e.fullOutput)}>Copiar</Btn>
+              <Btn small onClick={()=>{try{navigator.clipboard.writeText(e.fullOutput);}catch(err){const ta=document.createElement("textarea");ta.value=e.fullOutput;ta.style.cssText="position:fixed;left:-9999px";document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);}}}>Copiar</Btn>
               <Btn small onClick={()=>setEditLog(realIdx)}>Ver / Editar</Btn>
               <Btn small color={C.red} onClick={()=>deleteLog(realIdx)}>Borrar</Btn>
             </div>
@@ -1980,14 +2044,14 @@ function Clients(){
             </div>
             <div style={{fontSize:12,color:C.tx}}>{e.preview?.slice(0,200)}</div>
             <div style={{display:"flex",gap:6,marginTop:6}}>
-              <Btn small onClick={()=>navigator.clipboard.writeText(e.fullOutput)}>Copiar</Btn>
+              <Btn small onClick={()=>{try{navigator.clipboard.writeText(e.fullOutput);}catch(err){}}}>Copiar</Btn>
             </div>
           </div>;
         })}
       </div>
     </div>}
 
-    {lopdClient&&<LOPDDocument client={lopdClient} onClose={()=>setLopdClient(null)}/>}
+    {lopdClient&&<LOPDDocument client={lopdClient} onClose={()=>setLopdClient(null)} onSave={saveLOPD}/>}
   </div>;
 }
 
