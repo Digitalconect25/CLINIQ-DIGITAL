@@ -1,7 +1,13 @@
 import { getDb } from './_db.js';
-import crypto from 'crypto';
 
 let migrated = false;
+
+function genToken() {
+  const chars = 'abcdef0123456789';
+  let t = '';
+  for (let i = 0; i < 32; i++) t += chars[Math.floor(Math.random() * chars.length)];
+  return t;
+}
 
 async function ensureMigration(sql) {
   if (migrated) return;
@@ -33,7 +39,7 @@ export default async function handler(req, res) {
       }
 
       // Generate new token
-      const token = crypto.randomBytes(16).toString('hex');
+      const token = genToken();
       await sql`UPDATE clients SET share_token = ${token} WHERE id = ${clientId}`;
       return res.status(200).json({ token });
     }
