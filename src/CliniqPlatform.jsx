@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { db } from "./db.js";
 import BriefEditor, { formatBriefForPrompt } from "./BriefEditor.jsx";
+import ProjectStudio from "./ProjectStudio.jsx";
 
 const C = {
   bg:"#0B0F1A",sf:"#111827",sf2:"#1A2236",bd:"#2A3550",
@@ -310,7 +311,7 @@ function Txa({value,onChange,ph,rows}){
   }}/>;
 }
 function Lbl({children}){return <label style={{fontFamily:font,fontSize:11,fontWeight:600,color:C.tx,letterSpacing:0.5,textTransform:"uppercase",display:"block",marginBottom:6}}>{children}</label>;}
-function Crd({children,sx}){return <div style={{background:C.sf,border:"1px solid "+C.bd,borderRadius:12,padding:24,...sx}}>{children}</div>;}
+function Crd({children,sx,onClick}){return <div onClick={onClick} style={{background:C.sf,border:"1px solid "+C.bd,borderRadius:12,padding:24,cursor:onClick?"pointer":"default",...sx}}>{children}</div>;}
 function Fld({label,children}){return <div><Lbl>{label}</Lbl>{children}</div>;}
 function Badge({text,color}){return <span style={{fontSize:11,fontWeight:600,padding:"3px 10px",borderRadius:6,background:bg8(color||C.teal),color:color||C.teal}}>{text}</span>;}
 
@@ -2198,7 +2199,7 @@ export default function App(){
   },[]);
 
   const tools={
-    home:<Home setAct={setAct}/>,
+    home:<ProjectStudio setAct={setAct}/>,
     landing:<Landing/>,
     whatsapp:<WhatsApp/>,
     seo:<Seo/>,
@@ -2264,7 +2265,7 @@ export default function App(){
     </aside>
 
     <main style={{flex:1,padding:"24px 30px",overflowX:"hidden",minWidth:0}}>
-      {tools[act]||<Home setAct={setAct}/>}
+      {tools[act]||<ProjectStudio setAct={setAct}/>}
     </main>
   </div>;
 }
