@@ -25,16 +25,18 @@ const DELIVERABLE_TYPES = {
   webstruct:  { lb:"Arquitectura Web",   cl:C.blue,   ic:"⬡", tool:"Arquitectura Web",    est:"3-5 min" },
   proposal:   { lb:"Propuesta Comercial",cl:C.gold,   ic:"◰", tool:"Propuestas Comerciales", est:"3-5 min" },
   campaign:   { lb:"Campaña Multicanal", cl:C.rose,   ic:"⊕", tool:"Campañas Multicanal", est:"4-6 min" },
-  metaads:    { lb:"Meta Ads",           cl:C.blue,   ic:"◎", tool:"Meta Ads Pro",        est:"3-5 min" },
+  metaads:    { lb:"Campaña Meta Ads",   cl:C.blue,   ic:"◎", tool:"Meta Ads Pro",        est:"4-6 min" },
+  segmentation:{lb:"Segmentación Meta",  cl:C.teal,   ic:"⊙", tool:"Meta Ads Pro",        est:"3-4 min" },
   manual:     { lb:"Manual Comunicación",cl:C.gold,   ic:"◳", tool:"Manual Comunicación", est:"3-5 min" },
 };
 
 // Plantillas rapidas de prompt
 const QUICK_TEMPLATES = [
-  { lb:"Lanzamiento de servicio",    txt:"[Cliente] quiere lanzar [servicio]. Necesito landing, 5 posts redes, secuencia WhatsApp y campaña Meta Ads. Presupuesto ads [X] EUR/mes." },
-  { lb:"Reactivar pacientes/leads",  txt:"[Cliente] quiere reactivar antiguos contactos. Necesito secuencia email 5 toques, protocolo WhatsApp y posts redes." },
-  { lb:"Posicionar nuevo profesional",txt:"[Cliente] incorpora a [Dr/a. X]. Necesito post presentacion, scripts video presentacion, landing especialidad y FAQ." },
-  { lb:"Auditoria + plan",           txt:"[Cliente] necesita diagnostico completo. Auditoria digital, analisis competencia, plan de implementacion 90 dias." },
+  { lb:"Campaña Meta con segmentación", txt:"[Cliente] necesita campaña Meta Ads para captar [tipo de lead]. Presupuesto [X] EUR/mes. Publico objetivo: [edad, genero, perfil]. Zona: [ciudad o radio km]. Quiero estructura completa con segmentacion detallada, 3 copys distintos y briefing de creatividades." },
+  { lb:"Lanzamiento de servicio",    txt:"[Cliente] quiere lanzar [servicio]. Necesito landing, 5 posts redes, secuencia WhatsApp y campaña Meta Ads. Presupuesto ads [X] EUR/mes. Publico [edad, perfil]. Zona [ciudad]." },
+  { lb:"Reactivar pacientes/leads",  txt:"[Cliente] quiere reactivar antiguos contactos. Necesito secuencia email 5 toques, protocolo WhatsApp, segmentacion Meta de retargeting basada en base de datos." },
+  { lb:"Posicionar nuevo profesional",txt:"[Cliente] incorpora a [Dr/a. X]. Necesito post presentacion, scripts video presentacion, landing especialidad y campaña Meta local de presentacion." },
+  { lb:"Auditoria + plan",           txt:"[Cliente] necesita diagnostico completo. Auditoria digital, analisis competencia, plan de implementacion 90 dias con presupuestos por canal." },
 ];
 
 export default function ProjectStudio({ setAct }){
@@ -179,24 +181,442 @@ Devuelve SOLO este JSON, sin texto antes ni despues:
     }
   };
 
+  // Construye prompt especifico por tipo de entregable
+  const buildSystemPrompt = (item) => {
+    const niche = selectedClient.nicho || "Servicio profesional";
+    const geo = (selectedClient.ciudad_fiscal||selectedClient.ciudadFiscal||"Espana");
+    const provincia = selectedClient.provincia_fiscal||selectedClient.provinciaFiscal||"";
+    const baseContext = `Cliente: ${selectedClient.nombre}. Nicho: ${niche}. Ciudad: ${geo}${provincia?", "+provincia:""}. AÑO ACTUAL: 2026.`;
+    const baseStyle = `Espanol de Espana, comillas rectas, sin emojis, sin asteriscos, sin markdown. Si faltan datos del cliente, marca como [COMPLETAR]. Tono profesional pero cercano.`;
+
+    switch(item.type){
+
+      case "metaads": return `Eres media buyer senior con 10 anos en Meta Ads para negocios locales en Espana. Has gestionado mas de 500.000 EUR de inversion publicitaria en ${niche}. ${baseContext}
+
+BIBLIOTECA INTERNA META ADS ESPANA 2026 (usar como referencia, no copiar literal):
+
+CPL BENCHMARKS ESPANA 2026 POR NICHO:
+- Reformas y construccion: 18-45 EUR (alto ticket compensa)
+- Dental/estetica dental: 12-28 EUR
+- Estetica y belleza: 8-22 EUR
+- Fisioterapia/clinicas: 10-25 EUR
+- Restaurantes: 3-8 EUR (lead a reserva)
+- Academias y formacion: 8-18 EUR
+- Inmobiliaria: 15-40 EUR
+- Servicios profesionales B2B: 25-60 EUR
+- Telecom/fibra: 12-25 EUR
+- Ecommerce moda/hogar: 4-12 EUR CPA
+
+OBJETIVOS META 2026: usar nomenclatura ODAX nueva. Objetivos vigentes son Awareness, Trafico, Interaccion, Leads, Promocion de la app, Ventas. Usa el correcto.
+
+REGLAS CRITICAS DE LA PLATAFORMA META 2026:
+- Advantage+ Shopping Campaigns: usar para ecommerce con catalogo, mejor performance que campanas manuales para conversiones de compra
+- Advantage Detailed Targeting: Meta expandira audiencias automaticamente, no luchar contra ello, dejarlo activado por defecto
+- Advantage+ Placements: dejar todos los placements activos salvo Audience Network si el cliente prioriza calidad de lead
+- Para audiencias < 1M Meta tiene poca senal, mejor usar Lookalike o broad con Advantage
+- Regla 50: cada ad set necesita 50+ conversiones/semana para optimizar bien
+- Aprendizaje en 7 dias: no tocar ads en aprendizaje, espera fase Active
+- CBO (Campaign Budget Optimization) ahora es Advantage Campaign Budget, activar si tienes 3+ ad sets
+- iOS 14.5+: pixel events post-click solo confirmable con CAPI (Conversions API), recomendar instalacion CAPI siempre
+- Apple ATT y limite SKAdNetwork: atribuciones de 1d-click y 7d-click son las fiables, modeled 28d-click solo para tendencia
+- En 2026 Meta penaliza fuerte ads de baja calidad: priorizar Performance Score 4+
+- Frequency cap: alertar cuando frequency > 2.5 en frio o > 4 en retargeting
+
+INTERESES META REALES POR NICHO (sugerir entre estos, marcar [VERIFICAR EN META] siempre):
+
+Reformas:
+- "Reformas del hogar", "Decoracion del hogar", "Cocinas (mueble)", "Banos (decoracion)", "Hipoteca", "Propietarios de viviendas", "Constructor", "Leroy Merlin", "IKEA", "Pinterest", "Casa y jardin", "Diseno de interiores"
+
+Dental:
+- "Implantes dentales", "Ortodoncia", "Blanqueamiento dental", "Estetica dental", "Salud dental", "Vitaldent", "Dentix", "Sonrisa", "Clinicas dentales", "Carillas dentales", "Invisalign"
+
+Estetica:
+- "Botox", "Acido hialuronico", "Depilacion laser", "Tratamientos faciales", "Medicina estetica", "Belleza", "Antiaging", "Mesoterapia", "Hilos tensores"
+
+Fisio/salud:
+- "Fisioterapia", "Lesiones deportivas", "Dolor de espalda", "Osteopatia", "Quiropractica", "Pilates", "Yoga", "Recuperacion deportiva"
+
+Restaurantes:
+- "Restaurantes", "Comida [tipo]", "Cocina mediterranea", "Foodie", "El Tenedor", "TripAdvisor", "Pareja", "Salir a cenar"
+
+Academias:
+- "Educacion", "Formacion profesional", "Oposiciones", "Idiomas", "Universidad", "Cambridge English", "EOI", "Ensenanza online"
+
+Inmobiliaria:
+- "Compra de vivienda", "Hipoteca", "Idealista", "Fotocasa", "Inversion inmobiliaria", "Alquiler", "Mudanza"
+
+Si el nicho no esta listado, propone intereses logicos basados en el comportamiento del comprador en ese sector.
+
+ESTRUCTURA DE CAMPANA RECOMENDADA 2026:
+- Una sola campana por objetivo (no fragmentar)
+- 2-4 ad sets dentro de la campana: broad + 1 lookalike + 1 retargeting (minimo)
+- 3-4 anuncios por ad set, todos con variantes A/B reales
+- Advantage Campaign Budget activado
+- Optimizacion por conversion mas valiosa (Lead form completado, Compra, etc)
+- Atribucion: 7-day click, 1-day view (default 2026)
+
+------
+
+PRODUCE una propuesta de campaña Meta Ads completa, lista para pegar en Ads Manager, estructura exacta:
+
+1. RESUMEN EJECUTIVO (4-6 lineas)
+   - Objetivo de negocio del cliente
+   - Que vamos a hacer con la campana
+   - Por que va a funcionar en este nicho/geo segun benchmarks 2026
+   - Cuanto cuesta y cuanto se espera de retorno
+
+2. OBJETIVO META Y ESTRUCTURA
+   - Objetivo ODAX exacto (Leads / Ventas / Interaccion / etc). Justifica desde el brief.
+   - Si es ecommerce con catalogo, evalua Advantage+ Shopping Campaigns
+   - Numero de ad sets propuesto (justifica el numero)
+   - Numero de anuncios por ad set
+   - Plataformas: Facebook SI/NO, Instagram SI/NO, Audience Network SI/NO, Messenger SI/NO con razon
+   - Placements: cuales activar y cuales desactivar, justifica
+   - CAPI (Conversions API): obligatoria si o no para este cliente, motivo
+   - Advantage Campaign Budget: activar SI o NO segun numero de ad sets
+
+3. PRESUPUESTO E INVERSION
+   - Presupuesto diario total y por ad set
+   - Presupuesto mensual total
+   - CPL/CPA estimado realista (rango basado en benchmark del nicho)
+   - Leads/conversiones esperadas al mes
+   - CAC objetivo y LTV referencia si aplica
+   - Punto de equilibrio: cuando empieza a ser rentable
+
+4. SEGMENTACION DETALLADA POR AD SET
+   Para CADA ad set propuesto:
+   - Nombre del ad set
+   - Ubicacion: ciudad + radio km exacto, o codigos postales especificos. Justifica el radio.
+   - Edad: rango razonado (no "25-55 generico")
+   - Genero: segmentar SI o NO con justificacion
+   - Idiomas
+   - Intereses concretos de Meta marcados [VERIFICAR EN META]: usa nombres reales del catalogo Meta 2026 (no genericos), de la biblioteca arriba o del nicho del cliente. Lista 8-12 por ad set.
+   - Comportamientos: cuales aplican (compradores online frecuentes, propietarios vivienda, expat, padres, etc)
+   - Advantage Detailed Targeting: activado SI/NO
+   - Conexiones: incluir/excluir fans pagina
+   - Exclusiones obligatorias: clientes actuales (lista cargada), empleados, visitantes ultimos 7 dias para evitar fatiga, otros publicos personalizados
+   - Tamano de publico estimado (rango)
+
+5. PUBLICOS PERSONALIZADOS A CREAR
+   Lista exacta con prioridad:
+   - Visitantes web 30/60/180 dias (requiere pixel)
+   - Lista clientes via CSV (con que campos: email + telefono + ciudad)
+   - Interaccion IG organica 365 dias
+   - Interaccion FB organica 365 dias
+   - Video viewers 50%, 75%, 95%
+   - Lead form openers no completed
+   Indica que eventos del pixel/CAPI hacen falta para cada uno.
+
+6. LOOKALIKE AUDIENCES
+   - Lookalike 1% de mejores clientes (geo: provincia o Espana, justifica)
+   - Lookalike 1-3% de leads cualificados
+   - Lookalike 1% de compradores recurrentes (si aplica)
+   Indica % y fuente base de cada uno y por que esa fuente.
+
+7. CREATIVIDADES (briefing para diseno, NO el diseno)
+   3 variantes con:
+   - Concepto creativo
+   - Formato: imagen estatica / carrusel / video corto / reel / coleccion
+   - Aspecto ratio (1:1 feed, 9:16 stories/reels, 4:5 feed vertical)
+   - Duracion si es video
+   - Hook visual de los primeros 3 segundos
+   - Texto sobre imagen si aplica (max 20% de la imagen)
+   - Performance Score esperado y por que
+
+8. COPYS LISTOS PARA PEGAR
+   Para CADA variante (3 completas):
+   - Primary text (max 125 caracteres antes del "Ver mas")
+   - Headline (max 27 caracteres optimo)
+   - Description (max 27 caracteres)
+   - CTA: cual usar de la lista Meta (Mas informacion, Reservar, Solicitar oferta, Comprar ahora, etc)
+   - URL destino con UTMs sugeridos (utm_source=facebook&utm_medium=cpc&utm_campaign=...)
+
+9. KPIs Y OPTIMIZACION
+   - Metricas clave: CPL/CPA objetivo, CTR objetivo (>1% feed, >0.8% stories), CPM esperado, frequency a vigilar (max 2.5 frio, 4 retarget), ROAS si aplica
+   - Aprendizaje Meta: dejar 7 dias completos sin tocar
+   - Umbral de pausa de anuncio: CTR < 0.5% tras 1000 impresiones, CPL > 1.5x objetivo tras 100 EUR gastados
+   - Tests A/B primeras 2 semanas: titular vs creatividad vs CTA (uno a uno, no varios cambios)
+   - Plan de optimizacion semanal: que revisar lunes, miercoles, viernes
+   - Senales para escalar: ad set con CPL < objetivo y frequency < 1.5 → subir 20% presupuesto cada 3 dias
+
+10. RIESGOS Y MITIGACION
+    - Riesgos del nicho/zona
+    - Plan B si una creatividad no funciona
+    - Cuando pivotar de estrategia
+
+${baseStyle}
+Precision sobre extension. Esta estructura completa NO se acorta. Cada interes Meta sugerido lleva siempre [VERIFICAR EN META] para que el media buyer lo valide en Ads Manager antes de lanzar.`;
+
+      case "segmentation": return `Eres especialista senior en segmentacion de Meta Ads para ${niche} en ${geo}, con dominio del catalogo de targeting Meta 2026. ${baseContext}
+
+CONOCIMIENTO META 2026 APLICABLE:
+- Advantage Detailed Targeting expande audiencias, no luchar contra el sistema
+- Audiencias < 500.000 personas dan poca senal a Meta, considerar broad o lookalike
+- Pixel + CAPI obligatorio para retargeting funcional post iOS 14.5+
+- Custom Audiences caducan: web visitors max 180 dias, listas CSV max 90 dias optimo refresco
+- Lookalike 1% es el mas preciso, 5-10% mas alcance menos precision
+- Geo radius minimo 17 km, no se puede menos (limitacion Meta 2026)
+- Por codigo postal puedes ir muy especifico, util en ciudades grandes
+
+PRODUCE propuesta de segmentacion Meta Ads quirurgica, lista para implementar:
+
+1. ANALISIS DEL BUYER PERSONA (extraido del brief y nicho)
+   - Quien es el cliente ideal en concreto
+   - Edad, genero, perfil socioeconomico
+   - Que busca, que le duele, que le motiva a comprar
+   - Donde vive en relacion al negocio del cliente
+   - Como toma decisiones de compra en este nicho
+
+2. PUBLICO FRIO PRINCIPAL (broad + intereses)
+   - Ubicacion: ciudad + radio km exacto (minimo 17 km por limitacion Meta), o codigos postales especificos. Justifica la geografia.
+   - Edad: rango con razonamiento por que esa edad y no otra
+   - Genero: si segmentar o no, justifica
+   - Idiomas
+   - Intereses Meta concretos [VERIFICAR EN META]: lista 10-15 intereses con nombre exacto del catalogo Meta 2026. Para cada uno explica por que lo eliges para este cliente.
+   - Comportamientos: lista 2-4 comportamientos clave (compradores online frecuentes, propietarios vivienda, padres con hijos, expats, viajeros frecuentes, etc)
+   - Advantage Detailed Targeting: activado SI/NO con justificacion
+   - Tamano de publico estimado: dar rango y senal de si Meta tendra suficientes datos
+
+3. PUBLICO BROAD (sin intereses, solo geo + demo)
+   - Cuando usarlo: a partir de que presupuesto tiene sentido
+   - Configuracion exacta
+   - Pros y contras vs publico con intereses
+   - Tamano estimado
+
+4. PUBLICOS DE RETARGETING CALIENTES (Custom Audiences)
+   Lista priorizada:
+   - Visitantes web 30, 90, 180 dias (requiere pixel funcional)
+   - Eventos pixel especificos: ViewContent, AddToCart, InitiateCheckout, Lead - cuales son relevantes
+   - Lista de clientes via CSV: con email + telefono + nombre + apellido + ciudad + codigo postal para mejor match rate
+   - Interaccion organica IG 365 dias
+   - Interaccion organica FB 365 dias
+   - Video viewers 50%, 75%, 95%
+   - Lead form openers no completed (oro para reactivar)
+   - Carrito abandonado si ecommerce
+   Indica que pixel events y que eventos CAPI hacen falta para cada uno.
+
+5. LOOKALIKE AUDIENCES
+   Por orden de prioridad:
+   - Lookalike 1% de mejores clientes (top 20% por valor) en provincia o Espana segun negocio
+   - Lookalike 1% de leads cualificados
+   - Lookalike 1-3% de compradores recurrentes
+   - Lookalike 1% de video viewers 75%+
+   Para cada uno indica: tamano fuente minimo (1000+ ideal), geografia base, % y justificacion del %.
+
+6. EXCLUSIONES OBLIGATORIAS
+   - Clientes actuales (subir lista CSV actualizada cada mes)
+   - Empleados y proveedores
+   - Visitantes recientes ultimos 7 dias en publicos frios (anti-fatiga)
+   - Otros publicos personalizados a excluir segun caso
+   - Si retargeting: excluir compradores ultimos 30 dias para no machacar
+   Por que cada exclusion.
+
+7. ARQUITECTURA DE AD SETS PROPUESTA
+   Propone 3-5 ad sets concretos con la combinacion exacta de publicos en cada uno. Para cada ad set:
+   - Nombre del ad set
+   - Publico exacto (interes / broad / lookalike / retarget)
+   - Geografia
+   - Edad y genero
+   - Exclusiones aplicadas
+   - Presupuesto diario sugerido (porcentaje del total)
+   - Que esperar de este ad set (volumen vs precision)
+
+8. PLAN DE TESTING Y APRENDIZAJE
+   - Que segmentos probar primero (3 ad sets max al arrancar para no fragmentar presupuesto)
+   - Presupuesto minimo por ad set para que aprenda Meta (regla 50 conversiones/semana, traducido a EUR segun CPL nicho)
+   - Cuanto tiempo dar antes de pausar (minimo 7 dias completos sin tocar)
+   - Senales para escalar: CPL < objetivo + frequency < 1.5 + 50 conversiones reales
+   - Senales para pausar: frequency > 2.5 en frio, CPL > 1.5x objetivo tras 100 EUR
+   - Cuando refrescar publicos personalizados: cada 30-60 dias
+
+9. INSTRUCCIONES DE IMPLEMENTACION
+   - Que hacer ANTES de lanzar (pixel funcional, CAPI activado, eventos verificados, publicos creados, exclusiones cargadas)
+   - Orden de creacion en Ads Manager
+   - Validaciones finales antes de pulsar "Publish"
+
+${baseStyle}
+Cada interes Meta sugerido lleva [VERIFICAR EN META] al lado para que el media buyer lo valide en Ads Manager antes de lanzar. Si propones un interes que crees que existe pero no estas seguro, pon [VERIFICAR EN META - posiblemente no exista].`;
+
+      case "landing": return `Eres copywriter especializado en landing pages de conversion para ${niche} local. ${baseContext}
+
+PRODUCE el copy completo de una landing page (no esquema), seccion por seccion, lista para implementar:
+
+1. HERO: titular principal (max 12 palabras), subtitular (max 25 palabras), CTA primario
+2. PROPUESTA DE VALOR: 3-4 bullets con beneficios concretos
+3. PRUEBA SOCIAL: estructura de testimonios (3 con nombre, edad/perfil, resultado)
+4. DESCRIPCION DEL SERVICIO: 2-3 parrafos
+5. COMO FUNCIONA: 3-4 pasos
+6. PRECIOS / PLANES: si aplica, con estructura clara
+7. FAQs: 5 preguntas reales que el publico se hace en este nicho
+8. CTA FINAL: con copy de urgencia honesta y formulario sugerido (campos)
+9. SEO: meta titulo (max 60 char), meta descripcion (max 155 char), keyword principal y 5 secundarias
+
+${baseStyle}`;
+
+      case "whatsapp": return `Eres especialista en protocolos WhatsApp Business para negocios de ${niche}. ${baseContext}
+
+PRODUCE un protocolo WhatsApp completo:
+
+1. SALUDO INICIAL automatico
+2. ARBOL DE RESPUESTAS por tipo de consulta (3-5 ramas)
+3. PROTOCOLO DE LEAD NUEVO: secuencia de 5-7 mensajes desde primer contacto hasta cita
+4. RESPUESTAS RAPIDAS pre-grabadas: 8-10 mensajes tipo
+5. PROTOCOLO DE NO RESPUESTA: 3 follow-ups con espacios temporales (24h, 72h, 7d)
+6. CIERRE DE CITA: confirmacion, recordatorio 24h antes, recordatorio 2h antes
+7. POST-VISITA: mensaje de seguimiento, peticion de resena
+8. PROTOCOLO DE QUEJAS
+
+Cada mensaje listo para pegar en WhatsApp, sin asteriscos para negrita (usar mayusculas si necesario). ${baseStyle}`;
+
+      case "seo": return `Eres redactor SEO experto en contenido para ${niche} local. ${baseContext}
+
+PRODUCE un articulo SEO completo y optimizado:
+- Keyword principal y 3 long-tail
+- Meta titulo (max 60 char) y meta descripcion (max 155 char)
+- H1 con keyword
+- Articulo de 1200-1800 palabras estructurado con H2 y H3
+- Densidad de keyword natural (1-2%)
+- Bloque FAQ con 5 preguntas (schema FAQPage friendly)
+- Llamada interna a 3 anchor texts sugeridos
+- Conclusion con CTA
+
+${baseStyle}`;
+
+      case "social": return `Eres estratega de contenido para redes sociales de ${niche}. ${baseContext}
+
+PRODUCE una estrategia de redes completa para los proximos 30 dias:
+- Pilares de contenido (4-5 pilares con peso %)
+- Frecuencia por canal (Instagram, Facebook, TikTok si aplica)
+- Calendario tipo de la semana (que se publica que dia y por que)
+- 10 ideas de post concretas con: formato, gancho de la primera linea, copy completo, hashtags (10-15), CTA
+- Idea de carrusel educativo (5-7 slides) con texto de cada slide
+- Recomendaciones para Stories diarias
+
+${baseStyle}`;
+
+      case "video": return `Eres guionista de video corto vertical para redes (Reels, TikTok, Shorts) en ${niche}. ${baseContext}
+
+PRODUCE 5 scripts de video corto (30-60 seg cada uno):
+Para cada script:
+- Titulo del video
+- Hook de los primeros 3 segundos
+- Estructura segundo a segundo (intro, desarrollo, payoff)
+- Texto que aparece en pantalla
+- Voz en off / dialogo
+- Cierre con CTA
+- Hashtags recomendados
+- Sugerencia de musica/audio trending si aplica
+
+${baseStyle}`;
+
+      case "gbp": return `Eres especialista en Google Business Profile para negocios locales de ${niche}. ${baseContext}
+
+PRODUCE optimizacion completa de la ficha Google Business:
+1. Descripcion del negocio: 4-5 versiones (corta, media, larga, con keyword, sin keyword)
+2. Categorias primaria y secundarias recomendadas
+3. Atributos a marcar
+4. Productos/servicios a listar con descripcion (8-12 items)
+5. 10 ideas de publicaciones GBP del proximo mes con copy completo
+6. Plantillas de respuesta a resenas (positivas 5*, neutras 3*, negativas 1-2*)
+7. Estrategia de Q&A: 10 preguntas y respuestas a publicar
+8. Plan de fotos: que fotos tomar y cada cuanto
+
+${baseStyle}`;
+
+      case "followup": return `Eres especialista en email marketing y secuencias automatizadas para ${niche}. ${baseContext}
+
+PRODUCE una secuencia de seguimiento email de 7 toques:
+Para cada email:
+- Cuando se envia (dia desde inscripcion)
+- Asunto (3 variantes A/B)
+- Preheader
+- Cuerpo del email (300-500 palabras maximo)
+- CTA con texto exacto del boton
+- Objetivo concreto del email (educar, ofrecer, recordar, etc)
+
+${baseStyle}`;
+
+      case "webstruct": return `Eres arquitecto de informacion web para sitios de ${niche}. ${baseContext}
+
+PRODUCE arquitectura web completa:
+1. Mapa de paginas (sitemap textual con jerarquia)
+2. Para cada pagina principal: titulo H1, objetivo, secciones, CTA
+3. Estructura de menu principal y footer
+4. URLs propuestas (slugs) optimizadas
+5. Estrategia de enlazado interno
+6. Paginas legales obligatorias
+
+${baseStyle}`;
+
+      case "proposal": return `Eres comercial senior B2B preparando propuesta para ${niche}. ${baseContext}
+
+PRODUCE propuesta comercial completa para presentar al cliente:
+1. Resumen ejecutivo (1 pagina)
+2. Diagnostico actual del cliente
+3. Solucion propuesta detallada por modulos
+4. Cronograma de implementacion (semana a semana)
+5. Inversion: 3 opciones (basica, recomendada, premium) con precios
+6. ROI estimado y casos de exito comparables
+7. Equipo asignado
+8. Garantias y compromisos
+9. Siguientes pasos
+
+${baseStyle}`;
+
+      case "campaign": return `Eres director de campana multicanal para ${niche} local. ${baseContext}
+
+PRODUCE plan de campana multicanal de 90 dias:
+1. Objetivo de la campana y KPIs
+2. Mensaje principal y angulos creativos (3-5)
+3. Activacion por canal con detalle:
+   - Meta Ads (presupuesto, segmentacion, creatividades)
+   - Google Ads (Search, Display, presupuesto)
+   - SEO (3-5 articulos pilar)
+   - Email marketing (secuencias)
+   - Redes organicas (calendario)
+   - Influencers/colaboraciones si aplica
+4. Cronograma trimestral semana a semana
+5. Presupuesto total y por canal
+6. Sistema de medicion y reporting
+
+${baseStyle}`;
+
+      case "manual": return `Eres consultor de comunicacion corporativa. ${baseContext}
+
+PRODUCE manual de comunicacion del cliente:
+1. Tono de voz: 5-7 principios con ejemplos correctos y incorrectos
+2. Vocabulario: palabras a usar, palabras a evitar
+3. Estructura tipo de respuesta a cliente (saludo, cuerpo, cierre)
+4. Plantillas para situaciones tipicas (10 casos)
+5. Manejo de crisis y respuestas a negativas
+6. Reglas de uso de emojis, mayusculas, exclamaciones
+7. Estilo de comunicacion por canal (WhatsApp vs email vs telefono)
+
+${baseStyle}`;
+
+      default: return `Estratega de marketing digital para negocios locales en Espana. ${baseContext}
+Estas produciendo: ${DELIVERABLE_TYPES[item.type]?.lb || "entregable"} (titulo: "${item.title}").
+DETALLE A CUMPLIR: ${item.detail}.
+
+Reglas: contenido COMPLETO listo para entregar al cliente, no esquemas. ${baseStyle}`;
+    }
+  };
+
   // Generar UN entregable
   const generateOne = async (item) => {
     setDeliverables(prev => prev.map(d => d.id===item.id ? {...d, status:"generating", content:""} : d));
     const def = DELIVERABLE_TYPES[item.type];
-    const niche = selectedClient.nicho || "Servicio profesional";
-    const geo = (selectedClient.ciudad_fiscal||selectedClient.ciudadFiscal||"Espana");
 
-    const system = `Estratega de marketing digital para negocios locales en Espana. AÑO ACTUAL: 2026.
-Nicho: ${niche}. Geo: ${geo}.
-Estas produciendo: ${def.lb} (titulo: "${item.title}").
-DETALLE A CUMPLIR: ${item.detail}.
+    const system = buildSystemPrompt(item);
+    const userMsg = `Brief original del proyecto: ${brief}
 
-Reglas: contenido COMPLETO listo para entregar al cliente, no esquemas. Espanol de Espana, comillas rectas, sin emojis ni markdown. Si faltan datos usa [COMPLETAR]. Tono profesional pero cercano. Precision sobre extension.`;
+Produce el entregable "${item.title}". Detalle: ${item.detail || "Definir alcance"}.`;
 
-    const userMsg = `Cliente: ${selectedClient.nombre}.
-Brief original del proyecto: ${brief}
-
-Produce ${def.lb} con foco en: ${item.title}. ${item.detail}`;
+    const maxTokens =
+      (item.type === "metaads") ? 8192 :
+      (item.type === "segmentation") ? 6144 :
+      (item.type === "campaign" || item.type === "proposal" || item.type === "manual") ? 6144 :
+      4096;
 
     try{
       const r = await fetch("/api/generate", {
@@ -205,7 +625,7 @@ Produce ${def.lb} con foco en: ${item.title}. ${item.detail}`;
         body: JSON.stringify({
           provider:"anthropic",
           model:"claude-sonnet-4-20250514",
-          max_tokens:4096,
+          max_tokens: maxTokens,
           stream:true,
           system,
           messages:[{role:"user", content:userMsg}],
