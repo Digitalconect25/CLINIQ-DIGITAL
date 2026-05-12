@@ -1,12 +1,12 @@
-import { neon } from '@neondatabase/serverless';
 import { requirePin, corsHeaders } from './_pin.js';
-
-const sql = neon(process.env.DATABASE_URL);
+import { getDb } from './_db.js';
 
 export default async function handler(req, res) {
   corsHeaders(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (!requirePin(req, res)) return;
+
+  const sql = getDb();
 
   try {
     if (req.method === 'GET') {
