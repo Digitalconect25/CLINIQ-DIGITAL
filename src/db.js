@@ -36,6 +36,14 @@ export const db = {
     } catch { return null; }
   },
 
+  // Wrapper unico que decide crear o actualizar segun haya id (v2.0)
+  async saveClient(client) {
+    if (client && client.id) {
+      return await this.updateClient(client.id, client);
+    }
+    return await this.createClient(client);
+  },
+
   async deleteClient(id) {
     try {
       await fetch(`${API_BASE}/api/clients`, {
@@ -49,7 +57,8 @@ export const db = {
   // -- ACTIVITY LOG --
   async getActivity(clientName) {
     try {
-      const params = clientName && clientName !== 'all' ? `?client=${encodeURIComponent(clientName)}` : '';
+      const params = clientName && clientName !== 'all'
+        ? `?client=${encodeURIComponent(clientName)}` : '';
       const r = await fetch(`${API_BASE}/api/activity${params}`);
       if (!r.ok) return [];
       return await r.json();
@@ -65,84 +74,6 @@ export const db = {
       });
       if (!r.ok) return null;
       return await r.json();
-    } catch { return null; }
-  },
-
-  async deleteActivity(id) {
-    try {
-      await fetch(`${API_BASE}/api/activity`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-    } catch {}
-  },
-
-  async clearActivity() {
-    try {
-      await fetch(`${API_BASE}/api/activity`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clearAll: true })
-      });
-    } catch {}
-  },
-
-  // -- TASKS --
-  async getTasks(client) {
-    try {
-      const params = client && client !== 'all' ? `?client=${encodeURIComponent(client)}` : '';
-      const r = await fetch(`${API_BASE}/api/tasks${params}`);
-      if (!r.ok) return [];
-      return await r.json();
-    } catch { return []; }
-  },
-
-  async createTask(task) {
-    try {
-      const r = await fetch(`${API_BASE}/api/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(task)
-      });
-      if (!r.ok) return null;
-      return await r.json();
-    } catch { return null; }
-  },
-
-  async updateTask(id, data) {
-    try {
-      const r = await fetch(`${API_BASE}/api/tasks`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, ...data })
-      });
-      if (!r.ok) return null;
-      return await r.json();
-    } catch { return null; }
-  },
-
-  async deleteTask(id) {
-    try {
-      await fetch(`${API_BASE}/api/tasks`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-    } catch {}
-  },
-
-  // -- SHARE LINKS --
-  async getShareToken(clientId) {
-    try {
-      const r = await fetch(`${API_BASE}/api/client-view`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId })
-      });
-      if (!r.ok) return null;
-      const data = await r.json();
-      return data.token;
     } catch { return null; }
   }
 };
