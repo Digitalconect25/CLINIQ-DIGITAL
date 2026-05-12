@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { db } from "./db.js";
+import BriefEditor, { formatBriefForPrompt } from "./BriefEditor.jsx";
 
 const C = {
   bg:"#0B0F1A",sf:"#111827",sf2:"#1A2236",bd:"#2A3550",
@@ -72,6 +73,32 @@ function getLogForClient(clientName){
   if(!clientName) return ACTIVITY_LOG;
   return ACTIVITY_LOG.filter(e=>e.client===clientName);
 }
+
+/* ── GLOBAL BRIEFS CACHE (v2.0) ── */
+let BRIEFS_CACHE = {};
+let _briefsLoaded = false;
+async function loadBriefsFromDb(){
+  if(_briefsLoaded) return;
+  try{
+    const r=await fetch("/api/briefs");
+    if(!r.ok) return;
+    const data=await r.json();
+    if(Array.isArray(data)){
+      data.forEach(row=>{
+        if(row.nombre && row.brief){
+          const b=typeof row.brief==="string"?JSON.parse(row.brief):row.brief;
+          BRIEFS_CACHE[row.nombre]=b;
+        }
+      });
+      _briefsLoaded=true;
+    }
+  }catch(e){}
+}
+function getBriefForClient(clientName){
+  if(!clientName || clientName==="Sin asignar") return null;
+  return BRIEFS_CACHE[clientName] || null;
+}
+
 function exportLogPDF(entries, clientName){
   const today=new Date().toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"});
   let html=`<html><head><title>Registro de Actividad - ${clientName||"Todos"}</title><style>
@@ -137,8 +164,19 @@ const NICHES = [
   { id:"derma", lb:"Dermatología", txs:["Dermatología Clínica","Dermatoscopia","Tratamiento Acné","Psoriasis","Rosácea","Cirugía Dermatológica","Dermatología Pediátrica"] },
   { id:"psico", lb:"Psicología / Psiquiatría", txs:["Terapia Individual","Terapia de Pareja","Ansiedad","Depresión","TDAH","Terapia Adolescentes","Psiquiatría"] },
   { id:"nutri", lb:"Nutrición / Endocrinología", txs:["Plan Nutricional","Pérdida de Peso","Nutrición Deportiva","Intolerancias","Diabetes","Tiroides","Nutrición Oncológica"] },
+  { id:"reformas", lb:"Reformas y Trades", txs:["Reforma Integral","Cocinas","Baños","Electricidad","Fontanería","Pintura","Albañilería","Climatización","Carpintería","Suelos","Tejados","Aislamiento"] },
+  { id:"hosteleria", lb:"Restaurantes y Hostelería", txs:["Menú del día","Carta nueva","Eventos privados","Catering","Take away","Brunch","Cena romántica","Carta de vinos","Cocina temática","Reservas online"] },
+  { id:"academia", lb:"Academias y Formación", txs:["Refuerzo escolar","Idiomas","Oposiciones","Formación profesional","Cursos online","Talleres","Preparación selectividad","Cursos infantiles"] },
+  { id:"comercio", lb:"Comercio Local", txs:["Productos frescos","Entrega a domicilio","Gourmet","Ecológico","Marca propia","Productos artesanos"] },
+  { id:"servicios", lb:"Servicios Profesionales", txs:["Asesoría fiscal","Asesoría laboral","Asesoría contable","Consultoría","Abogados","Notaría","Inmobiliaria","Seguros","Gestoría"] },
   { id:"otro", lb:"Otro nicho (especificar)", txs:[] },
 ];
+
+const HEALTH_IDS = ["estetica","dental","multi","fertilidad","fisio","oftalmo","derma","psico","nutri"];
+function isHealthLabel(lb){
+  const n=NICHES.find(x=>x.lb===lb);
+  return n?HEALTH_IDS.includes(n.id):false;
+}
 
 const MENU = [
   {g:"PANEL"},{id:"home",ic:"◫",lb:"Panel de Control",cl:C.teal},
@@ -208,7 +246,7 @@ const PLATFORM_DB = [
   {id:"doctoralia",name:"Doctoralia",cat:"Directorios Salud",priority:1,icon:"D",cl:C.teal,healthOnly:true},
   {id:"topdoctors",name:"Top Doctors",cat:"Directorios Salud",priority:2,icon:"T",cl:C.blue,healthOnly:true},
 ];
-const isHealthNiche=(lb)=>{const n=NICHES.find(x=>x.lb===lb);return n?["estetica","dental","multi","fertilidad","fisio","oftalmo","derma","psico","nutri"].includes(n.id):false;};
+const isHealthNiche=(lb)=>{const n=NICHES.find(x=>x.lb===lb);return n?HEALTH_IDS.includes(n.id):false;};
 const getPlatformsForNiche=(lb)=>PLATFORM_DB.filter(p=>!p.healthOnly||isHealthNiche(lb));
 
 function StatusDot({status}){
@@ -402,9 +440,18 @@ function Out({content,loading,label}){
 }
 
 /* ── AI ENGINE ── */
-function buildSys(nicheResolved, geo){
-  return `Estratega de marketing digital para negocios locales en Espana. AÑO ACTUAL: 2026. Nicho: ${nicheResolved}. Geo: ${geo}.
-Reglas: Terminologia profesional del sector. SEO local (keyword en titulo, H2s, primer y ultimo parrafo, densidad 1-2%, LSI keywords, geo-keywords "[servicio] + [ciudad/barrio]"). Sector salud: cumplir regulacion publicitaria sanitaria espanola, sin claims de resultado. Texto limpio sin markdown/asteriscos/almohadillas. Espanol de Espana, comillas rectas, sin emojis. No inventar datos: usar [COMPLETAR] si faltan. Recomendaciones accionables y concretas. Precision sobre extension. IMPORTANTE: Usa informacion, tendencias, datos y referencias de 2025-2026. No uses datos obsoletos.`;
+function buildSys(nicheResolved, geo, brief){
+  const isHealth=isHealthLabel(nicheResolved);
+  let base=`Estratega de marketing digital para negocios locales en Espana. AÑO ACTUAL: 2026. Nicho: ${nicheResolved}. Geo: ${geo}.
+Reglas: Terminologia profesional del sector. SEO local (keyword en titulo, H2s, primer y ultimo parrafo, densidad 1-2%, LSI keywords, geo-keywords "[servicio] + [ciudad/barrio]").`;
+  if(isHealth){
+    base+=` Sector salud: cumplir regulacion publicitaria sanitaria espanola, sin claims de resultado, sin antes-despues, sin testimonios identificables.`;
+  }else{
+    base+=` Adaptar lenguaje y referencias al sector concreto (no usar terminologia sanitaria salvo que aplique).`;
+  }
+  base+=` Texto limpio sin markdown/asteriscos/almohadillas. Espanol de Espana, comillas rectas, sin emojis. No inventar datos: usar [COMPLETAR] si faltan. Recomendaciones accionables y concretas. Precision sobre extension. IMPORTANTE: Usa informacion, tendencias, datos y referencias de 2025-2026. No uses datos obsoletos.`;
+  if(brief) base+=formatBriefForPrompt(brief);
+  return base;
 }
 
 async function streamRequest(body,setO,setL,onText){
@@ -430,7 +477,6 @@ async function streamRequest(body,setO,setL,onText){
           await new Promise(ok=>setTimeout(ok,wait*1000));
           continue;
         }
-        // Fallback chain: groq -> deepseek -> claude haiku
         if((body.provider==="groq"||body.provider==="deepseek")&&attempt===maxRetries-1){
           const nextProvider=body.provider==="groq"?"deepseek":"anthropic";
           const nextModel=body.provider==="groq"?MODELS.ds:MODELS.fast;
@@ -488,7 +534,6 @@ async function streamRequest(body,setO,setL,onText){
         setO(`Error de conexion, reintentando en 5s...`);
         await new Promise(ok=>setTimeout(ok,5000));continue;
       }
-      // Fallback chain on connection error: groq -> deepseek -> claude
       if(body.provider==="groq"||body.provider==="deepseek"){
         const nextProvider=body.provider==="groq"?"deepseek":"anthropic";
         const nextModel=body.provider==="groq"?MODELS.ds:MODELS.fast;
@@ -503,7 +548,6 @@ async function streamRequest(body,setO,setL,onText){
   setL(false);return null;
 }
 
-/* ── MODEL ROUTING ── */
 const MODELS={
   fast:"claude-haiku-4-5-20251001",
   mid:"claude-sonnet-4-5-20250929",
@@ -516,12 +560,8 @@ const MODELS={
   groqQwen:"qwen/qwen3-32b"
 };
 function pickModel(toolHint){
-  // Tier 1 - Groq Maverick: fast + cheap ($0.20/$0.60, 562 TPS) for light tasks
   const groqTier=["Respuesta Reseñas","Google Business","WhatsApp","Scripts Vídeo","Prompts Imagen IA","Multiplicador Contenido","Manual Comunicación","Secuencias Seguimiento","Expansión Plataformas","Auditoría NAP","SEO Voz","Monitor de Marca"];
-  // Tier 2 - Claude Sonnet 4.5: balanced quality for mid-complexity
   const midTier=["Landing Pages","Contenido SEO","Estrategia Redes","Arquitectura Web","Verificador Normativo","Reporting Mensual"];
-  // Tier 3 - Claude Sonnet 4: max quality for complex analysis
-  // (everything else: Meta Ads, Propuestas, Campañas, Dashboard, Auditorías, Deep Analysis, aiSearch)
   if(groqTier.some(t=>toolHint?.includes(t))) return {model:MODELS.groqMid,provider:"groq"};
   if(midTier.some(t=>toolHint?.includes(t))) return {model:MODELS.mid,provider:"anthropic"};
   return {model:MODELS.full,provider:"anthropic"};
@@ -529,9 +569,10 @@ function pickModel(toolHint){
 
 async function ai(sysExtra,prompt,setO,setL,niche,geo,logInfo){
   setL(true);setO("");
-  const sys=buildSys(niche||"Servicio profesional",geo||"Espana")+"\n\n"+sysExtra;
+  const brief=getBriefForClient(logInfo?.client);
+  const sys=buildSys(niche||"Servicio profesional",geo||"Espana",brief)+"\n\n"+sysExtra;
   const {model,provider}=pickModel(logInfo?.tool||sysExtra);
-  const full=await streamRequest({model,provider,max_tokens:4096,stream:true,system:sys,messages:[{role:"user",content:prompt}]},setO,setL);
+  const full=await streamRequest({model,provider,max_tokens:4096,stream:true,system:sys,messages:[{role:"user",content:prompt}],hint:logInfo?.tool||""},setO,setL);
   if(full&&!full.startsWith("Error")&&!full.startsWith("ERROR")){
     const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);
     logActivity(toolName,logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full,{provider,model,inputText:prompt});
@@ -576,11 +617,11 @@ function extractInputs(prompt){
   return inputs;
 }
 
-/* ── AI WITH WEB SEARCH (STREAMING + RETRY) ── */
 async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
   setL(true);setO("");
   if(setPhase) setPhase("search");
-  const sys=buildSys(niche||"Servicio profesional",geo||"Espana")+"\n\n"+sysExtra;
+  const brief=getBriefForClient(logInfo?.client);
+  const sys=buildSys(niche||"Servicio profesional",geo||"Espana",brief)+"\n\n"+sysExtra;
   const maxRetries=3;
   for(let attempt=0;attempt<maxRetries;attempt++){
   try{
@@ -589,7 +630,8 @@ async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
       body:JSON.stringify({
         model:"claude-sonnet-4-20250514",max_tokens:4096,stream:true,system:sys,
         messages:[{role:"user",content:prompt}],
-        tools:[{type:"web_search_20250305",name:"web_search"}]
+        tools:[{type:"web_search_20250305",name:"web_search"}],
+        hint:logInfo?.tool||""
       })
     });
     if(r.status===429||r.status===529||(r.status>=400&&!r.ok)){
@@ -650,7 +692,6 @@ async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
   if(setPhase) setPhase("done");setL(false);
 }
 
-/* ── PROGRESS RING (SVG) ── */
 function ProgressRing({score,max,size,color,label,sublabel}){
   const sz=size||90;const r=(sz-10)/2;const circ=2*Math.PI*r;
   const pct=Math.min(100,Math.max(0,(score/max)*100));
@@ -670,7 +711,6 @@ function ProgressRing({score,max,size,color,label,sublabel}){
   </div>;
 }
 
-/* ── RADAR SCORE (SVG) ── */
 function RadarScore({items,size}){
   const sz=size||200;const cx=sz/2;const cy=sz/2;const maxR=(sz-40)/2;
   const n=items.length;if(n<3) return null;
@@ -691,7 +731,6 @@ function RadarScore({items,size}){
   </svg>;
 }
 
-/* ── ENHANCED OUT COMPONENT ── */
 function OutSearch({content,loading,label,phase}){
   const ref=useRef(null);
   useEffect(()=>{if(ref.current)ref.current.scrollTop=ref.current.scrollHeight;},[content]);
@@ -722,7 +761,6 @@ function OutSearch({content,loading,label,phase}){
   </div>;
 }
 
-/* ── ACTION ITEM COMPONENT ── */
 function ActionItem({priority,title,time,impact,platform,done,onToggle}){
   const pColors={alta:C.red,media:C.gold,baja:C.green};
   return <div onClick={onToggle} style={{
@@ -745,7 +783,6 @@ function ActionItem({priority,title,time,impact,platform,done,onToggle}){
   </div>;
 }
 
-/* ── TOOL WRAPPER ── */
 function Tool({title,fields,out,ld,label,btnTxt,btnCl,onGen,ok,subtitle}){
   return <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
     <div style={{flex:"0 0 380px",maxWidth:"100%"}}><Crd>
@@ -780,61 +817,17 @@ KEYWORDS GEO OBLIGATORIAS que deben aparecer de forma natural:
 
 Genera TEXTO COMPLETO Y DEFINITIVO para cada seccion (texto real listo para publicar, no esquemas):
 
-1. HERO
-- H1 que posicione para "${srv} en ${ci||"[ciudad]"}" (maximo 70 caracteres)
-- Subtitulo emocional que conecte con la necesidad del paciente/cliente (maximo 120 caracteres)
-- CTA principal claro y directo
-- Texto de refuerzo bajo el CTA (urgencia suave: disponibilidad, primera consulta, etc.)
-
-2. PROBLEMA / NECESIDAD
-- Describe las preocupaciones REALES y concretas del paciente/cliente que busca este servicio
-- Usa 3-4 preguntas que buscan en Google sobre este tema
-- Conecta emocionalmente: que siente, que le preocupa, que ha probado antes
-
-3. SOLUCION / BENEFICIOS
-- Texto orientado 100% al beneficio, no a las caracteristicas tecnicas
-- Keywords secundarias integradas de forma natural
-- 4-5 beneficios concretos con descripcion de 2 lineas cada uno
-- Diferenciador del centro respecto a la competencia local
-
-4. PROCESO PASO A PASO
-- 4-5 pasos concretos desde la primera consulta hasta el resultado
-- Reduce incertidumbre con detalles reales: que ocurre en cada fase, duracion, que esperar
-- Lenguaje accesible aunque tecnico cuando sea necesario
-
-5. EQUIPO / AUTORIDAD
-- Texto que posicione al profesional como referente en ${geo}
-- Credenciales verificables, anos de experiencia, casos realizados
-- Formacion especifica en "${srv}" si aplica
-- Pertenencia a sociedades cientificas o colegios profesionales
-
-6. FAQ - 6 PREGUNTAS REALES
-- Preguntas que buscan usuarios en Google sobre "${srv}"
-- Respuestas concisas (3-4 lineas) optimizadas para featured snippets
-- Incluir al menos 2 preguntas con componente geo-local
-
-7. TESTIMONIOS - 3 ESTRUCTURAS
-- Placeholders con estructura narrativa que refuerce confianza local
-- Formato: nombre ficticio + zona de ${geo} + servicio + resultado + recomendacion
-- Indicar [SUSTITUIR POR TESTIMONIO REAL]
-
-8. CTA FINAL
-- Urgencia natural sin agresividad
-- Formulario con campos minimos (nombre, telefono, servicio interes)
-- Telefono directo + WhatsApp + email
-- Horario de atencion
-
-9. BLOQUE DE CONFIANZA
-- Certificaciones reales del sector
-- Cifras verificables (anos, pacientes atendidos con marcador [COMPLETAR])
-- Referencias locales en ${geo}
-- Logos de aseguradoras / colaboradores si aplica
-
-10. SEO META
-- Title tag (maximo 60 caracteres, con keyword + ciudad)
-- Meta description (maximo 155 caracteres, con geo + CTA)
-- Schema markup sugerido (tipo LocalBusiness + MedicalBusiness si sanitario)
-- Open Graph tags sugeridos`,sO,sL,nR,geo)}
+1. HERO con H1 (max 70 chars), subtitulo emocional (max 120 chars), CTA y texto refuerzo.
+2. PROBLEMA con preocupaciones reales y 3-4 preguntas tipo Google.
+3. SOLUCION con 4-5 beneficios y diferenciador local.
+4. PROCESO PASO A PASO 4-5 pasos concretos.
+5. EQUIPO posicionando como referente en ${geo}.
+6. FAQ 6 preguntas reales con respuestas optimizadas.
+7. TESTIMONIOS 3 estructuras con [SUSTITUIR POR TESTIMONIO REAL].
+8. CTA FINAL con formulario, telefono, WhatsApp, email y horario.
+9. BLOQUE DE CONFIANZA con certificaciones reales del sector.
+10. SEO META: title (60c), meta description (155c), schema markup, OG tags.`,sO,sL,nR,geo,
+    {tool:"Landing Pages",client:nm||"Sin asignar",inputs:{servicio:srv,tono:tone}})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <TreatmentSelector niche={ni} treatment={tx} setTreatment={sTx} customTx={ctx} setCustomTx={sCtx}/>
@@ -851,20 +844,10 @@ function WhatsApp(){
   const nR=resolveNiche(ni,cni);
   const scs=["Primera consulta nuevo","Post-consulta no reservó","Confirmación cita","Recordatorio 24h","Post-tratamiento día siguiente","Post-tratamiento 1 semana","Reactivación 3 meses","Reactivación 6 meses","Consulta precio","Consulta servicio","Cancelación","Solicitud reseña Google","Presupuesto pendiente","Derivación entre profesionales"];
   return <Tool title="Protocolos WhatsApp" subtitle="Mensajes listos para enviar adaptados a cada escenario" out={o} ld={l} label="Protocolo" btnTxt="Generar Protocolo" btnCl={C.green} ok={ni&&sc} onGen={()=>
-    ai("Experto en comunicacion WhatsApp Business para centros de salud y servicios profesionales. Cada mensaje debe sonar NATURAL, como lo escribiria una recepcionista profesional con experiencia, no como un bot ni como un mensaje de marketing. Maximo 160 palabras por mensaje. Los mensajes deben cumplir estrictamente con la LOPD y el RGPD.",
-    `Protocolo WhatsApp completo para el escenario: "${sc}".
-Centro: ${nm||"[Nombre del centro]"}.
-Sector: ${nR}.
-
-Genera contenido LISTO PARA COPIAR Y ENVIAR por WhatsApp Business:
-
-1. MENSAJE PRINCIPAL
-2. VARIANTE A - TONO FORMAL
-3. VARIANTE B - TONO CERCANO
-4. RESPUESTAS PREPARADAS (4 minimo)
-5. GUIA DE ENVIO
-6. ERRORES FRECUENTES
-7. NOTAS LEGALES`,sO,sL,nR,"Espana")}
+    ai("Experto en comunicacion WhatsApp Business para centros de salud y servicios profesionales. Cada mensaje debe sonar NATURAL, como lo escribiria una recepcionista profesional con experiencia. Maximo 160 palabras por mensaje. Cumplir LOPD y RGPD.",
+    `Protocolo WhatsApp completo para el escenario: "${sc}". Centro: ${nm||"[Nombre]"}. Sector: ${nR}.
+Genera: MENSAJE PRINCIPAL, VARIANTE FORMAL, VARIANTE CERCANA, 4 RESPUESTAS PREPARADAS, GUIA DE ENVIO, ERRORES FRECUENTES, NOTAS LEGALES.`,sO,sL,nR,"Espana",
+    {tool:"Protocolos WhatsApp",client:nm||"Sin asignar",inputs:{escenario:sc}})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <Fld label="Escenario"><Sel value={sc} onChange={sSc} opts={scs} ph="Seleccionar..."/></Fld>
@@ -879,15 +862,10 @@ function Seo(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Contenido SEO Geo-Optimizado" subtitle="Artículos posicionados para búsquedas locales" out={o} ld={l} label="Artículo SEO" btnTxt="Generar Artículo" btnCl={C.purple} ok={ni&&tp} onGen={()=>
-    ai("Experto SEO en 2026 con especializacion en posicionamiento local para el sector sanitario y servicios profesionales en Espana. Aplica las mejores practicas SEO actualizadas a 2026.",
-    `ARTICULO SEO GEO-OPTIMIZADO
-Tema: "${tp}"
-Keyword principal: "${kw||tp}"
-Localizacion: ${geo}
-Extension objetivo: ${ln}
-Intencion de busqueda: ${intent}
-
-Genera articulo completo con: TITLE TAG, META DESCRIPTION, URL, ESTRUCTURA ENCABEZADOS, ARTICULO COMPLETO, FAQ (5), CTA INTERNO, KEYWORDS SECUNDARIAS, ENLACES INTERNOS, SCHEMA MARKUP, NOTAS SEO TECNICAS.`,sO,sL,nR,geo)}
+    ai("Experto SEO en 2026 con especializacion en posicionamiento local para sector sanitario y servicios profesionales en Espana.",
+    `ARTICULO SEO GEO-OPTIMIZADO. Tema: "${tp}". Keyword: "${kw||tp}". Geo: ${geo}. Extension: ${ln}. Intencion: ${intent}.
+Genera: TITLE TAG, META DESCRIPTION, URL, ESTRUCTURA H1-H3, ARTICULO COMPLETO, FAQ 5 preguntas, CTA INTERNO, KEYWORDS SECUNDARIAS, ENLACES INTERNOS, SCHEMA MARKUP, NOTAS SEO.`,sO,sL,nR,geo,
+    {tool:"Contenido SEO",inputs:{tema:tp,extension:ln}})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
       <Fld label="Tema"><Inp value={tp} onChange={sTp} ph="Ej: Qué esperar tras un implante dental"/></Fld>
@@ -905,10 +883,9 @@ function Audit(){
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Auditoría Digital" subtitle="Análisis completo de la presencia digital del negocio" out={o} ld={l} label="Informe" btnTxt="Generar Informe" btnCl={C.gold} ok={u&&ni} onGen={()=>
     ai("Auditor experto en experiencia digital para negocios locales.",
-    `Auditoria digital completa del negocio: ${u}
-Localizacion: ${geo}. Sector: ${nR}. Notas: ${nt||"Ninguna"}
-
-Genera informe con: RESUMEN EJECUTIVO, WEB (/100), SEO LOCAL (/100), GBP (/100), EXPERIENCIA DIGITAL (/100), REDES SOCIALES (/100), PLAN DE ACCION PRIORIZADO, PROYECCION.`,sO,sL,nR,geo)}
+    `Auditoria digital de: ${u}. Geo: ${geo}. Sector: ${nR}. Notas: ${nt||"Ninguna"}
+Genera: RESUMEN EJECUTIVO, WEB (/100), SEO LOCAL (/100), GBP (/100), EXPERIENCIA DIGITAL (/100), REDES (/100), PLAN PRIORIZADO, PROYECCION.`,sO,sL,nR,geo,
+    {tool:"Auditoría Digital",inputs:{web:u}})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
       <Fld label="Web o nombre"><Inp value={u} onChange={sU} ph="www.ejemplo.es"/></Fld>
@@ -922,10 +899,10 @@ function Followup(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const srv=resolveTx(tx,ctx);
   return <Tool title="Secuencias Seguimiento" subtitle="Nurturing automatizado para convertir interesados en pacientes" out={o} ld={l} label="Secuencia" btnTxt="Generar" btnCl={C.rose} ok={ni&&srv} onGen={()=>
-    ai("Experto en secuencias de seguimiento y nurturing para negocios de servicios.",
-    `Secuencia completa de seguimiento para personas interesadas en "${srv}" que NO han reservado cita.
-Centro: ${nm||"[Nombre]"}. Canal: ${ch}. Sector: ${nR}.
-Genera 5 mensajes COMPLETOS: DIA 1, DIA 3, DIA 7, DIA 14, DIA 30. Incluye ASUNTO, MENSAJE, OBJETIVO, METRICA, REGLAS, NOTAS LEGALES, VARIACIONES A/B.`,sO,sL,nR,"Espana")}
+    ai("Experto en secuencias de seguimiento y nurturing.",
+    `Secuencia completa para personas interesadas en "${srv}" que NO han reservado. Centro: ${nm||"[Nombre]"}. Canal: ${ch}. Sector: ${nR}.
+5 mensajes: DIA 1, DIA 3, DIA 7, DIA 14, DIA 30. Incluye ASUNTO, MENSAJE, OBJETIVO, METRICA, REGLAS, NOTAS LEGALES, A/B.`,sO,sL,nR,"Espana",
+    {tool:"Secuencias Seguimiento",client:nm||"Sin asignar",inputs:{servicio:srv,canal:ch}})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <TreatmentSelector niche={ni} treatment={tx} setTreatment={sTx} customTx={ctx} setCustomTx={sCtx}/>
@@ -941,8 +918,9 @@ function WebStruct(){
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Arquitectura Web" subtitle="Estructura y URLs optimizadas para SEO local" out={o} ld={l} label="Arquitectura" btnTxt="Generar" btnCl={C.blue} ok={!!ni} onGen={()=>
     ai("Arquitecto de informacion web con SEO tecnico y local integrado.",
-    `Arquitectura web completa para: ${nm||"[Nombre]"}. Localizacion: ${geo}. Especialidades: ${sp||"[Definir]"}. Equipo: ${dc||"[Definir]"}. Sector: ${nR}.
-Genera: MAPA DEL SITIO CON URLs, HOME, PLANTILLA SERVICIO, EQUIPO, BLOG, PAGINAS TRANSVERSALES, ENLAZADO INTERNO, SEO TECNICO.`,sO,sL,nR,geo)}
+    `Arquitectura web para: ${nm||"[Nombre]"}. Geo: ${geo}. Especialidades: ${sp||"[Definir]"}. Equipo: ${dc||"[Definir]"}. Sector: ${nR}.
+Genera: SITEMAP CON URLs, HOME, PLANTILLA SERVICIO, EQUIPO, BLOG, PAGINAS TRANSVERSALES, ENLAZADO INTERNO, SEO TECNICO.`,sO,sL,nR,geo,
+    {tool:"Arquitectura Web",client:nm||"Sin asignar"})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
@@ -959,9 +937,10 @@ function Social(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Estrategia Redes Sociales" subtitle="Calendario editorial completo con contenido listo para publicar" out={o} ld={l} label="Estrategia" btnTxt="Generar Estrategia" btnCl={C.purple} ok={!!ni} onGen={()=>
-    ai("Estratega de redes sociales en 2026 especializado en negocios locales. Conoce las tendencias, algoritmos y formatos actuales de cada plataforma.",
-    `Estrategia completa de ${pl} para: ${nm||"[Nombre]"}. Sector: ${nR}. Localizacion: ${geo}. Periodo: ${wk}. Objetivo: ${obj}.
-Genera: ANALISIS, PILARES DE CONTENIDO, CALENDARIO EDITORIAL, GUIONES REELS, STORIES, HASHTAGS, METRICAS, CUMPLIMIENTO NORMATIVO.`,sO,sL,nR,geo)}
+    ai("Estratega de redes sociales en 2026 especializado en negocios locales.",
+    `Estrategia ${pl} para: ${nm||"[Nombre]"}. Sector: ${nR}. Geo: ${geo}. Periodo: ${wk}. Objetivo: ${obj}.
+Genera: ANALISIS, PILARES CONTENIDO, CALENDARIO EDITORIAL, GUIONES REELS, STORIES, HASHTAGS, METRICAS, CUMPLIMIENTO NORMATIVO.`,sO,sL,nR,geo,
+    {tool:"Estrategia Redes",client:nm||"Sin asignar",inputs:{plataforma:pl,objetivo:obj}})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Plataforma"><Sel value={pl} onChange={sPl} opts={["Instagram","TikTok","Facebook","LinkedIn","Instagram + TikTok","Todas"]}/></Fld>
@@ -978,9 +957,10 @@ function Gbp(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Google Business Profile" subtitle="Optimización completa del perfil de negocio en Google" out={o} ld={l} label="Guía GBP" btnTxt="Generar Guía" btnCl={C.gold} ok={!!ni} onGen={()=>
-    ai("Especialista en Google Business Profile y SEO local en 2026. Conoce las ultimas funcionalidades de GBP y los factores de ranking actualizados.",
-    `Guia completa GBP para: ${nm||"[Nombre]"}. Localizacion: ${geo}. Sector: ${nR}.
-Genera: CHECKLIST OPTIMIZACION, ESTRATEGIA FOTOS, PUBLICACIONES (4 semanas), RESPUESTAS RESENAS, FAQ PROACTIVAS, MONITORIZACION.`,sO,sL,nR,geo)}
+    ai("Especialista en Google Business Profile y SEO local en 2026.",
+    `Guia completa GBP para: ${nm||"[Nombre]"}. Geo: ${geo}. Sector: ${nR}.
+Genera: CHECKLIST OPTIMIZACION, ESTRATEGIA FOTOS, PUBLICACIONES 4 semanas, RESPUESTAS RESENAS, FAQ PROACTIVAS, MONITORIZACION.`,sO,sL,nR,geo,
+    {tool:"Google Business",client:nm||"Sin asignar"})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
@@ -994,10 +974,10 @@ function Video(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const srv=resolveTx(tx,ctx);
   return <Tool title="Scripts Vídeo" subtitle="Guiones completos listos para grabar" out={o} ld={l} label="Scripts" btnTxt="Generar Scripts" btnCl={C.orange} ok={ni&&srv} onGen={()=>
-    ai("Guionista de video para redes sociales en 2026. Conoce los formatos, tendencias y algoritmos actuales de Instagram Reels, TikTok y YouTube Shorts.",
-    `4 scripts de video sobre "${srv}" para ${pl}.
-Centro: ${nm||"[Nombre]"}. Profesional: ${dc||"[Nombre]"}. Objetivo: ${gl}.
-Genera 4 scripts: EDUCATIVO, MITOS, PROCESO, FAQ. Cada uno con GANCHO, DESARROLLO, CTA, TEXTO PANTALLA, INDICACIONES, COPY POST, HASHTAGS.`,sO,sL,nR,"Espana")}
+    ai("Guionista de video para redes sociales en 2026.",
+    `4 scripts sobre "${srv}" para ${pl}. Centro: ${nm||"[Nombre]"}. Profesional: ${dc||"[Nombre]"}. Objetivo: ${gl}.
+4 scripts: EDUCATIVO, MITOS, PROCESO, FAQ. Cada uno: GANCHO, DESARROLLO, CTA, TEXTO PANTALLA, INDICACIONES, COPY POST, HASHTAGS.`,sO,sL,nR,"Espana",
+    {tool:"Scripts Vídeo",client:nm||"Sin asignar"})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <TreatmentSelector niche={ni} treatment={tx} setTreatment={sTx} customTx={ctx} setCustomTx={sCtx}/>
@@ -1014,9 +994,10 @@ function Competitor(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
   return <Tool title="Competencia Local" subtitle="Análisis del posicionamiento competitivo en tu zona" out={o} ld={l} label="Análisis" btnTxt="Analizar" btnCl={C.cyan} ok={nm&&ci&&ni} onGen={()=>
-    ai("Analista de competencia digital en 2026 con enfoque en SEO local.",
-    `Analisis competencia local para: ${nm} en ${geo}. Competidores: ${cm||"Buscar principales"}. Sector: ${nR}.
-Genera: MAPA COMPETITIVO, WEB COMPARATIVO, SEO LOCAL, GOOGLE MAPS, REDES, PRECIOS, OPORTUNIDADES GEO-LOCALES, PLAN DE ACCION.`,sO,sL,nR,geo)}
+    ai("Analista de competencia digital en 2026.",
+    `Analisis competencia para: ${nm} en ${geo}. Competidores: ${cm||"Buscar principales"}. Sector: ${nR}.
+Genera: MAPA COMPETITIVO, WEB COMPARATIVO, SEO LOCAL, GOOGLE MAPS, REDES, PRECIOS, OPORTUNIDADES GEO-LOCALES, PLAN.`,sO,sL,nR,geo,
+    {tool:"Competencia Local",client:nm})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Tu cliente"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
@@ -1030,12 +1011,13 @@ function Compliance(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);
   return <Tool title="Verificador Normativo" subtitle="Análisis de cumplimiento legal publicitario" out={o} ld={l} label="Informe" btnTxt="Verificar" btnCl={C.rose} ok={!!txt} onGen={()=>
-    ai("Consultor de cumplimiento normativo publicitario en Espana actualizado a 2026. Conoce la legislacion vigente, incluyendo LOPD-GDD, RGPD, Ley General de Publicidad, normativa AEMPS y regulacion autonomica actualizada.",
+    ai("Consultor de cumplimiento normativo publicitario en Espana 2026.",
     `Analiza texto "${tp}" contra normativa del sector ${nR}:
 """
 ${txt}
 """
-Genera: VEREDICTO, INFRACCIONES, ADVERTENCIAS, BUENAS PRACTICAS, VERSION CORREGIDA, CHECKLIST.`,sO,sL,nR,"Espana")}
+Genera: VEREDICTO, INFRACCIONES, ADVERTENCIAS, BUENAS PRACTICAS, VERSION CORREGIDA, CHECKLIST.`,sO,sL,nR,"Espana",
+    {tool:"Verificador Normativo",inputs:{tipo:tp}})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}/>
       <Fld label="Tipo texto"><Sel value={tp} onChange={sTp} opts={["Texto web / landing","Post redes","Anuncio Meta/Google","Email","WhatsApp","Blog/SEO","Guion vídeo","Folleto"]}/></Fld>
@@ -1050,9 +1032,9 @@ function Reviews(){
   const nR=resolveNiche(ni,cni);
   return <Tool title="Respuesta Reseñas" subtitle="Respuestas profesionales para reseñas de Google" out={o} ld={l} label="Respuestas" btnTxt="Generar" btnCl={C.green} ok={!!ni} onGen={()=>
     ai("Especialista en reputacion online y gestion de resenas.",
-    `Genera respuestas para resena de Google:
-Centro: ${nm||"[Nombre]"}. Sector: ${nR}. Puntuacion: ${rt}. Tipo: ${sc}. ${rv?'Texto: "'+rv+'"':"(Solo puntuacion)"}.
-Genera: RESPUESTA PRINCIPAL, VARIANTE FORMAL, VARIANTE CERCANA, REGLAS, ACCION INTERNA${rt.includes("1")||rt.includes("2")||rt.includes("3")?", PROTOCOLO RECUPERACION":""}.`,sO,sL,nR,"Espana")}
+    `Genera respuestas para resena de Google. Centro: ${nm||"[Nombre]"}. Sector: ${nR}. Puntuacion: ${rt}. Tipo: ${sc}. ${rv?'Texto: "'+rv+'"':"(Solo puntuacion)"}.
+Genera: RESPUESTA PRINCIPAL, VARIANTE FORMAL, VARIANTE CERCANA, REGLAS, ACCION INTERNA${rt.includes("1")||rt.includes("2")||rt.includes("3")?", PROTOCOLO RECUPERACION":""}.`,sO,sL,nR,"Espana",
+    {tool:"Respuesta Reseñas",client:nm||"Sin asignar",inputs:{puntuacion:rt}})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
@@ -1072,7 +1054,8 @@ function Report(){
     ai("Analista de marketing digital para negocios locales.",
     `Informe mensual. Centro: ${nm}. Mes: ${mo}. Sector: ${nR}.
 Datos: Visitas: ${vi||"[COMPLETAR]"}, Consultas: ${co||"[COMPLETAR]"}, Reservas: ${bk||"[COMPLETAR]"}, Google: ${gp||"[COMPLETAR]"}, Resenas: ${rv||"[COMPLETAR]"}, Redes: ${so||"[COMPLETAR]"}.
-Genera: RESUMEN EJECUTIVO, TRAFICO WEB, CONVERSION, SEO LOCAL, GBP, REDES, PLAN PROXIMO MES, PROYECCION.`,sO,sL,nR,"Espana")}
+Genera: RESUMEN EJECUTIVO, TRAFICO WEB, CONVERSION, SEO LOCAL, GBP, REDES, PLAN PROXIMO MES, PROYECCION.`,sO,sL,nR,"Espana",
+    {tool:"Reporting Mensual",client:nm,inputs:{mes:mo}})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
@@ -1093,8 +1076,9 @@ function Manual(){
   const nR=resolveNiche(ni,cni);
   return <Tool title="Manual Comunicación" subtitle="Guía completa de marca y comunicación para todo el equipo" out={o} ld={l} label="Manual" btnTxt="Generar Manual" btnCl={C.gold} ok={nm&&ni} onGen={()=>
     ai("Consultor de marca y comunicacion para negocios de servicios.",
-    `MANUAL DE COMUNICACION para: ${nm}. Sector: ${nR}. Servicios: ${tx||"[Principales]"}. Equipo: ${dc||"[Profesionales]"}. Tono: ${tn||"Profesional y cercano"}. Valores: ${vl||"[Valores]"}. Audiencia: ${au||"30-55 anos"}.
-Genera: IDENTIDAD DE MARCA, TONO DE VOZ, MENSAJES CLAVE, PROTOCOLOS, GUIA POR CANAL, GUIA VISUAL, CUMPLIMIENTO, PLANTILLAS.`,sO,sL,nR,"Espana")}
+    `MANUAL DE COMUNICACION para: ${nm}. Sector: ${nR}. Servicios: ${tx||"[Principales]"}. Equipo: ${dc||"[Profesionales]"}. Tono: ${tn||"Profesional"}. Valores: ${vl||"[Valores]"}. Audiencia: ${au||"30-55 anos"}.
+Genera: IDENTIDAD MARCA, TONO VOZ, MENSAJES CLAVE, PROTOCOLOS, GUIA POR CANAL, GUIA VISUAL, CUMPLIMIENTO, PLANTILLAS.`,sO,sL,nR,"Espana",
+    {tool:"Manual Comunicación",client:nm})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
       <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre completo"/></Fld>
@@ -1105,9 +1089,6 @@ Genera: IDENTIDAD DE MARCA, TONO DE VOZ, MENSAJES CLAVE, PROTOCOLOS, GUIA POR CA
       <Fld label="Audiencia"><Inp value={au} onChange={sAu} ph="Mujeres 30-55, nivel medio-alto"/></Fld>
     </>}/>;
 }
-
-/* ══════ SIMPLE PLACEHOLDER TOOLS ══════ */
-/* These tools use aiSearch or ai with simpler prompts to keep file size manageable */
 
 function ScanPresencia(){
   const[nm,sNm]=useState("");const[ci,sCi]=useState("");const[ni,sNi]=useState("");const[cni,sCni]=useState("");
@@ -1126,10 +1107,11 @@ function ScanPresencia(){
           <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Fld label="Web"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
           <Btn primary disabled={!nm||!ci||!ni} color={C.teal} onClick={()=>
-            aiSearch("Investigador de presencia digital en 2026. Busca en Internet informacion REAL y actualizada sobre este negocio. Busca el nombre, resenas, perfiles en redes, directorios y menciones. Responde en espanol de Espana.",
-            `SCAN DE PRESENCIA DIGITAL 360 para: "${nm}" en ${ci}. Sector: ${nR}. Web: ${web||"No proporcionada"}.
-Busca: 1) "${nm}" en Google 2) "${nm} resenas" 3) "${nR} en ${ci}" 4) Presencia en Google Maps, Facebook, Instagram, Doctoralia, etc.
-Genera informe con: ESTADO POR PLATAFORMA, RESENAS, COMPETENCIA, GAPS, PLAN DE ACCION.`,sO,sL,nR,ci||"Espana",setPhase)
+            aiSearch("Investigador de presencia digital en 2026.",
+            `SCAN 360 para: "${nm}" en ${ci}. Sector: ${nR}. Web: ${web||"No proporcionada"}.
+Busca: 1) "${nm}" en Google 2) "${nm} resenas" 3) "${nR} en ${ci}" 4) Presencia en Google Maps, Facebook, Instagram, Doctoralia.
+Genera: ESTADO POR PLATAFORMA, RESENAS, COMPETENCIA, GAPS, PLAN DE ACCION.`,sO,sL,nR,ci||"Espana",setPhase,
+            {tool:"Scan Presencia 360",client:nm})
           }>Buscar en Internet</Btn>
         </div>
       </Crd></div>
@@ -1157,9 +1139,10 @@ function DeepAnalysis(){
           <Fld label="Web"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
           <Fld label="Competidor"><Inp value={comp1} onChange={sComp1} ph="Nombre competidor"/></Fld>
           <Btn primary disabled={!nm||!ci||!ni} color={C.teal} onClick={()=>
-            aiSearch("Investigador digital profesional en 2026. Busca informacion REAL, VERIFICABLE y ACTUALIZADA. NO inventes datos. Responde en espanol de Espana.",
-            `ANALISIS PROFUNDO para: "${nm}" en ${ci}. Sector: ${nR}. Web: ${web||"No proporcionada"}. Competidor: ${comp1||"Buscar principales"}.
-Busca: presencia Google, resenas, redes, competencia, SEO. Genera informe con FUENTES REALES.`,sO,sL,nR,ci||"Espana",setPhase)
+            aiSearch("Investigador digital profesional en 2026.",
+            `ANALISIS PROFUNDO para: "${nm}" en ${ci}. Sector: ${nR}. Web: ${web||"No proporcionada"}. Competidor: ${comp1||"Buscar"}.
+Busca: presencia Google, resenas, redes, competencia, SEO. Genera informe con FUENTES REALES.`,sO,sL,nR,ci||"Espana",setPhase,
+            {tool:"Análisis Profundo",client:nm})
           }>Investigar en Internet</Btn>
         </div>
       </Crd></div>
@@ -1174,9 +1157,10 @@ function Expansion(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);
   return <Tool title="Expansión Plataformas" subtitle="Guía paso a paso para dar de alta el negocio en plataformas" out={o} ld={l} label="Guía Expansión" btnTxt="Generar Guía" btnCl={C.blue} ok={nm&&ci&&ni} onGen={()=>
-    ai("Especialista en local listings y expansion digital en 2026 para negocios locales en Espana. Conoce las plataformas y directorios relevantes actualizados.",
-    `GUIA DE EXPANSION DIGITAL para: "${nm}" en ${ci}. Sector: ${nR}. Dir: ${dir||"[COMPLETAR]"}. Tel: ${tel||"[COMPLETAR]"}. Web: ${web||"[COMPLETAR]"}.
-Genera guia COMPLETA para: Google Business, Google Maps, Bing Places, Apple Maps, Facebook, Instagram, LinkedIn, Paginas Amarillas, Doctoralia (si salud). Para cada una: URL acceso, pasos, datos a introducir, descripcion optimizada, fotos, primeras acciones.`,sO,sL,nR,ci||"Espana")}
+    ai("Especialista en local listings y expansion digital en 2026.",
+    `GUIA EXPANSION para: "${nm}" en ${ci}. Sector: ${nR}. Dir: ${dir||"[COMPLETAR]"}. Tel: ${tel||"[COMPLETAR]"}. Web: ${web||"[COMPLETAR]"}.
+Para Google Business, Maps, Bing, Apple Maps, Facebook, Instagram, LinkedIn, P.Amarillas, Doctoralia (si salud): URL, pasos, datos, descripcion, fotos, primeras acciones.`,sO,sL,nR,ci||"Espana",
+    {tool:"Expansión Plataformas",client:nm})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Nombre *"><Inp value={nm} onChange={sNm} ph="Nombre exacto"/></Fld>
@@ -1195,7 +1179,8 @@ function CitationsAudit(){
   return <Tool title="Auditoría NAP / Citations" subtitle="Verifica consistencia de datos en todas las plataformas" out={o} ld={l} label="Informe NAP" btnTxt="Auditar NAP" btnCl={C.gold} ok={nm&&ci} onGen={()=>
     ai("Experto en SEO local y consistencia NAP para negocios en Espana.",
     `AUDITORIA NAP para: "${nm}". Dir: "${dir||"[COMPLETAR]"}". Ciudad: ${ci}. Tel: "${tel||"[COMPLETAR]"}". Web: "${web||"[COMPLETAR]"}". Sector: ${nR}.
-Genera: ANALISIS NOMBRE, DIRECCION, TELEFONO, WEB, IMPACTO SEO, CHECKLIST CORRECCION, HERRAMIENTAS, MANTENIMIENTO.`,sO,sL,nR,ci||"Espana")}
+Genera: ANALISIS NOMBRE, DIRECCION, TELEFONO, WEB, IMPACTO SEO, CHECKLIST CORRECCION, HERRAMIENTAS, MANTENIMIENTO.`,sO,sL,nR,ci||"Espana",
+    {tool:"Auditoría NAP",client:nm})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Nombre oficial *"><Inp value={nm} onChange={sNm} ph="Nombre exacto"/></Fld>
@@ -1222,14 +1207,16 @@ function Reputation(){
           <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
           <Fld label="Ciudad"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
           <Btn primary disabled={!nm||!ni} color={C.teal} onClick={()=>
-            aiSearch("Investigador de reputacion online en 2026. Busca resenas REALES y actualizadas en Google, Facebook, Doctoralia. Responde en espanol de Espana.",
+            aiSearch("Investigador de reputacion online en 2026.",
             `DIAGNOSTICO REPUTACION para: "${nm}" en ${ci||"Espana"}. Sector: ${nR}.
-Busca resenas reales, compara con competencia, analiza sentimiento. Genera plan de solicitud de resenas y protocolo respuesta.`,sO,sL,nR,ci||"Espana",setPhase)
+Busca resenas reales, compara con competencia, analiza sentimiento. Plan de solicitud y protocolo respuesta.`,sO,sL,nR,ci||"Espana",setPhase,
+            {tool:"Reputación",client:nm})
           }>Buscar reseñas reales</Btn>
           <Btn primary disabled={!nm||!ni} color={C.green} onClick={()=>
             ai("Especialista en generacion de resenas para negocios locales.",
-            `SISTEMA DE SOLICITUD DE RESENAS para: ${nm}. Sector: ${nR}. Ciudad: ${ci||"Espana"}.
-Genera: enlace directo resena Google, mensajes WhatsApp (3 variantes), emails (2 variantes), SMS, guion recepcion, materiales fisicos, automatizacion, timing, metricas, cumplimiento legal.`,sO,sL,nR,ci||"Espana")
+            `SISTEMA SOLICITUD RESENAS para: ${nm}. Sector: ${nR}. Ciudad: ${ci||"Espana"}.
+Genera: enlace directo resena Google, WhatsApp (3 variantes), emails (2), SMS, guion recepcion, materiales fisicos, automatizacion, timing, metricas, legal.`,sO,sL,nR,ci||"Espana",
+            {tool:"Reputación - Solicitud",client:nm})
           }>Generar Sistema Solicitud</Btn>
         </div>
       </Crd></div>
@@ -1243,9 +1230,10 @@ function VoiceSeo(){
   const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);
   return <Tool title="SEO para Búsquedas por Voz" subtitle="Optimiza para Google Assistant, Siri, Alexa" out={o} ld={l} label="Voice SEO" btnTxt="Generar Estrategia" btnCl={C.purple} ok={nm&&ci&&ni} onGen={()=>
-    ai("Especialista en Voice Search Optimization en 2026 para negocios locales en Espana. Conoce las ultimas tendencias en busqueda por voz con Alexa, Google Assistant y Siri.",
+    ai("Especialista en Voice Search Optimization en 2026 para Espana.",
     `ESTRATEGIA VOICE SEO para: ${nm} en ${ci}. Sector: ${nR}.
-Genera: CONSULTAS DE VOZ, FUENTES POR ASISTENTE, CONTENIDO OPTIMIZADO, SCHEMA MARKUP, BUSQUEDAS CERCA DE MI, METRICAS.`,sO,sL,nR,ci||"Espana")}
+Genera: CONSULTAS DE VOZ, FUENTES POR ASISTENTE, CONTENIDO OPTIMIZADO, SCHEMA MARKUP, BUSQUEDAS CERCA DE MI, METRICAS.`,sO,sL,nR,ci||"Espana",
+    {tool:"SEO Voz",client:nm})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
@@ -1259,8 +1247,9 @@ function BrandMonitor(){
   const nR=resolveNiche(ni,cni);
   return <Tool title="Monitor de Marca Online" subtitle="Estrategia para detectar y gestionar menciones" out={o} ld={l} label="Plan Monitor" btnTxt="Generar Plan" btnCl={C.orange} ok={nm&&ni} onGen={()=>
     ai("Consultor de brand monitoring y online reputation management.",
-    `PLAN MONITORIZACION MARCA para: ${nm} en ${ci||"Espana"}. Sector: ${nR}.
-Genera: ALERTAS GOOGLE, ALERTAS GBP, ALERTAS REDES, MONITORIZACION RESENAS, COMPETENCIA, CONTENIDO NEGATIVO, HERRAMIENTAS, PROTOCOLO RESPUESTA, INFORME MENSUAL, CALENDARIO.`,sO,sL,nR,ci||"Espana")}
+    `PLAN MONITORIZACION para: ${nm} en ${ci||"Espana"}. Sector: ${nR}.
+Genera: ALERTAS GOOGLE, ALERTAS GBP, ALERTAS REDES, RESENAS, COMPETENCIA, NEGATIVO, HERRAMIENTAS, PROTOCOLO RESPUESTA, INFORME MENSUAL, CALENDARIO.`,sO,sL,nR,ci||"Espana",
+    {tool:"Monitor de Marca",client:nm})}
     fields={<>
       <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
       <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
@@ -1268,6 +1257,35 @@ Genera: ALERTAS GOOGLE, ALERTAS GBP, ALERTAS REDES, MONITORIZACION RESENAS, COMP
     </>}/>;
 }
 
+function ImplementHub(){
+  const[nm,sNm]=useState("");const[ci,sCi]=useState("");const[ni,sNi]=useState("");const[cni,sCni]=useState("");
+  const[o,sO]=useState("");const[l,sL]=useState(false);const[phase,setPhase]=useState(null);
+  const nR=resolveNiche(ni,cni);
+  return <div>
+    <div style={{marginBottom:20}}>
+      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Hub de Implementación</h3>
+      <p style={{fontSize:13,color:C.tx,margin:0}}>Plan de acción personalizado basado en datos reales</p>
+    </div>
+    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
+      <div style={{flex:"0 0 380px",maxWidth:"100%"}}><Crd>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
+          <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
+          <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
+          <Btn primary disabled={!nm||!ni} color={C.rose} onClick={()=>
+            aiSearch("Consultor de marketing digital en 2026.",
+            `PLAN IMPLEMENTACION para: "${nm}" en ${ci}. Sector: ${nR}.
+Busca el negocio, detecta estado real, genera: DIAGNOSTICO EXPRESS, FASE 1 URGENTE, FASE 2 CORTO, FASE 3 MEDIO, MANTENIMIENTO, IMPACTO ESTIMADO.`,sO,sL,nR,ci||"Espana",setPhase,
+            {tool:"Hub Implementación",client:nm})
+          }>Generar Plan (busca en Internet)</Btn>
+        </div>
+      </Crd></div>
+      <div style={{flex:1,minWidth:300}}><OutSearch content={o} loading={l} label="Plan Implementación" phase={phase}/></div>
+    </div>
+  </div>;
+}
+
+/* ══════ IMAGE PROMPT + FLUX ══════ */
 function ImagePrompt(){
   const[ni,sNi]=useState("");const[cni,sCni]=useState("");
   const[idea,sIdea]=useState("");const[platform,setPlatform]=useState("Midjourney");const[style,setStyle]=useState("Fotografía profesional");
@@ -1303,8 +1321,6 @@ function ImagePrompt(){
       <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Imagen IA</h3>
       <p style={{fontSize:13,color:C.tx,margin:0}}>Genera prompts optimizados y crea imagenes directamente con Flux AI</p>
     </div>
-
-    <Tab tabs={[{id:"gen",lb:"Generar Imagen"},{id:"prompts",lb:"Generador Prompts"},{id:"history",lb:"Historial ("+imgHistory.length+")"}]} active={imgResult!==null||imgLoading?"gen":"gen"} onChange={()=>{}}/>
 
     <div style={{display:"flex",gap:24,flexWrap:"wrap",marginTop:16}}>
       <div style={{flex:"0 0 400px",maxWidth:"100%"}}>
@@ -1403,9 +1419,8 @@ function ImagePrompt(){
     <div style={{marginTop:24,borderTop:"1px solid "+C.bd,paddingTop:20}}>
       <h4 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Generador de Prompts por IA</h4>
       <Tool title="" subtitle="" out={o} ld={l} label="Prompts" btnTxt="Generar Prompts IA" btnCl={C.purple} ok={ni&&idea} onGen={()=>
-        ai("Experto en prompt engineering para generacion de imagenes IA en 2026. Prompts para Midjourney v6/DALL-E 3/Flux/SD3/Leonardo EN INGLES. Explicaciones en espanol de Espana.",
-        `PROMPTS DE IMAGEN IA
-Sector: ${nR}. Centro: ${nm||"[Negocio]"}. Idea: ${idea}. Plataforma: ${platform}. Estilo: ${style}.
+        ai("Experto en prompt engineering para imagenes IA 2026.",
+        `PROMPTS DE IMAGEN IA. Sector: ${nR}. Centro: ${nm||"[Negocio]"}. Idea: ${idea}. Plataforma: ${platform}. Estilo: ${style}.
 Genera 4 prompts COMPLETOS listos para copiar, con parametros, negative prompt, instrucciones uso, tips del sector.`,sO,sL,nR,"Espana",
         {tool:"Prompts Imagen IA",client:nm||"Sin asignar",inputs:{idea:idea,plataforma:platform}})}
         fields={<>
@@ -1418,35 +1433,7 @@ Genera 4 prompts COMPLETOS listos para copiar, con parametros, negative prompt, 
   </div>;
 }
 
-function ImplementHub(){
-  const[nm,sNm]=useState("");const[ci,sCi]=useState("");const[ni,sNi]=useState("");const[cni,sCni]=useState("");
-  const[o,sO]=useState("");const[l,sL]=useState(false);const[phase,setPhase]=useState(null);
-  const nR=resolveNiche(ni,cni);
-  return <div>
-    <div style={{marginBottom:20}}>
-      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Hub de Implementación</h3>
-      <p style={{fontSize:13,color:C.tx,margin:0}}>Plan de acción personalizado basado en datos reales</p>
-    </div>
-    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
-      <div style={{flex:"0 0 380px",maxWidth:"100%"}}><Crd>
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
-          <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
-          <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
-          <Btn primary disabled={!nm||!ni} color={C.rose} onClick={()=>
-            aiSearch("Consultor de marketing digital en 2026. Busca el negocio en Internet, detecta estado real actualizado y genera plan personalizado. Responde en espanol de Espana.",
-            `PLAN IMPLEMENTACION para: "${nm}" en ${ci}. Sector: ${nR}.
-Busca el negocio, detecta estado real, genera: DIAGNOSTICO EXPRESS, FASE 1 URGENTE, FASE 2 CORTO PLAZO, FASE 3 MEDIO PLAZO, MANTENIMIENTO, IMPACTO ESTIMADO.`,sO,sL,nR,ci||"Espana",setPhase)
-          }>Generar Plan (busca en Internet)</Btn>
-        </div>
-      </Crd></div>
-      <div style={{flex:1,minWidth:300}}><OutSearch content={o} loading={l} label="Plan Implementación" phase={phase}/></div>
-    </div>
-  </div>;
-}
-
-/* ══════ LOPD GENERATOR ══════ */
-/* ══════ LOPD CHECKBOX (module level) ══════ */
+/* ══════ LOPD CHECKBOX ══════ */
 function LopdChk({checked,onChange,label}){
   return <div onClick={(e)=>{e.preventDefault();e.stopPropagation();onChange(!checked);}} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 0",cursor:"pointer",userSelect:"none"}}>
     <div style={{width:22,height:22,borderRadius:4,border:"2px solid "+(checked?C.green:C.bd),background:checked?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,marginTop:1,transition:"all 0.15s"}}>
@@ -1477,130 +1464,72 @@ function LOPDDocument({client,onClose,onSave}){
   const dateStr=fmtDate(docDate);
 
   const buildPlainText=()=>`DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION
-PROTECCION DE DATOS PERSONALES
-(Conforme al Reglamento General de Proteccion de Datos UE 2016/679
-y Ley Organica 3/2018 de Proteccion de Datos Personales y Garantia de los Derechos Digitales)
+PROTECCION DE DATOS PERSONALES (RGPD UE 2016/679 + LO 3/2018)
 
-===================================================================
-
-1. DATOS DEL RESPONSABLE DEL TRATAMIENTO
-
+1. RESPONSABLE DEL TRATAMIENTO
 Razon social: ${empresa}
 CIF/NIF: ${cifEmpresa}
 Domicilio: ${dirEmpresa}
-Email de contacto: ${emailEmpresa}
-Delegado de Proteccion de Datos: ${emailEmpresa}
+Email: ${emailEmpresa}
 
-2. DATOS DEL INTERESADO (CLIENTE)
-
-Nombre / Razon social: ${client.nombre||"[NOMBRE]"}
-NIF/CIF: ${client.nif||"[NIF/CIF]"}
-Domicilio fiscal: ${client.dirFiscal||"[DIRECCION]"}, ${client.cpFiscal||""} ${client.ciudadFiscal||"[CIUDAD]"} (${client.provinciaFiscal||""})
+2. INTERESADO (CLIENTE)
+Nombre: ${client.nombre||"[NOMBRE]"}
+NIF/CIF: ${client.nif||"[NIF]"}
+Domicilio: ${client.dirFiscal||"[DIRECCION]"}, ${client.cpFiscal||""} ${client.ciudadFiscal||"[CIUDAD]"} (${client.provinciaFiscal||""})
 Email: ${client.email||"[EMAIL]"}
 Telefono: ${client.telefono||"[TELEFONO]"}
-Persona de contacto: ${client.contacto||"[CONTACTO]"}
+Contacto: ${client.contacto||"[CONTACTO]"}
 Cargo: ${client.cargoContacto||"[CARGO]"}
 
 3. FINALIDAD DEL TRATAMIENTO
-
-Los datos personales facilitados seran tratados con las siguientes finalidades:
 a) Gestion de la relacion contractual (Plan: ${client.plan||"[PLAN]"})
-b) Facturacion y cobro de los servicios contratados
-c) Gestion de presencia digital y reputacion online del negocio del interesado
-d) Creacion y gestion de contenido digital en nombre del interesado
-e) Comunicaciones relacionadas con el servicio contratado
+b) Facturacion y cobro
+c) Gestion de presencia digital y reputacion online
+d) Creacion y gestion de contenido digital
+e) Comunicaciones relacionadas con el servicio
 ${comercial==="autorizo"?"f) Envio de comunicaciones comerciales sobre servicios propios":""}
 
-4. BASE JURIDICA DEL TRATAMIENTO
-
-- Art. 6.1.b) RGPD: Ejecucion de contrato o medidas precontractuales
-- Art. 6.1.a) RGPD: Consentimiento del interesado
-- Art. 6.1.c) RGPD: Cumplimiento de obligaciones legales (fiscales, mercantiles)
-
-5. PLAZO DE CONSERVACION
-
-Los datos se conservaran durante la vigencia de la relacion contractual y, tras su finalizacion, durante los plazos legalmente establecidos:
-- 4 anos para obligaciones fiscales y tributarias
-- 5 anos para obligaciones contractuales y civiles
-- 3 anos para datos de caracter personal sin otra base legal
-
-6. DESTINATARIOS DE LOS DATOS
-
-Los datos podran ser comunicados a:
-- Administraciones publicas cuando exista obligacion legal
-- Proveedores tecnologicos necesarios para la prestacion del servicio (hosting, herramientas digitales)
-- No se realizan transferencias internacionales de datos fuera del EEE
-
-7. DERECHOS DEL INTERESADO
-
-El interesado podra ejercer los siguientes derechos:
-- Derecho de acceso a sus datos personales
-- Derecho de rectificacion de datos inexactos
-- Derecho de supresion ("derecho al olvido")
-- Derecho a la limitacion del tratamiento
-- Derecho a la portabilidad de los datos
-- Derecho de oposicion al tratamiento
-
-Ejercicio de derechos: Por escrito a ${dirEmpresa} o email a ${emailEmpresa}
-Plazo de respuesta: 1 mes desde la recepcion de la solicitud
-Reclamaciones: Agencia Espanola de Proteccion de Datos (www.aepd.es)
+4. BASE JURIDICA: Art. 6.1.b) contrato, Art. 6.1.a) consentimiento, Art. 6.1.c) legal.
+5. PLAZO CONSERVACION: 4 anos fiscal, 5 anos contractual, 3 anos datos personales.
+6. DESTINATARIOS: Administraciones publicas, proveedores tecnologicos. Sin transferencias fuera EEE.
+7. DERECHOS: Acceso, rectificacion, supresion, limitacion, portabilidad, oposicion. Ejercicio: ${emailEmpresa}. Reclamaciones: AEPD.
 
 8. CONSENTIMIENTO
-
-D./Da. ${client.contacto||client.nombre||"_________________________"}, con NIF ${client.nif||"_____________"}, en calidad de ${client.cargoContacto||"representante legal"} de ${client.nombre||"_________________________"}:
-
-${consent1?"[X]":"[ ]"} CONSIENTO expresamente el tratamiento de mis datos para las finalidades descritas en el apartado 3.
-${consent2?"[X]":"[ ]"} AUTORIZO la gestion de la presencia digital de mi negocio en las plataformas acordadas.
-${consent3?"[X]":"[ ]"} ${comercial==="autorizo"?"AUTORIZO":"NO AUTORIZO"} el envio de comunicaciones comerciales sobre servicios propios.
+D./Da. ${client.contacto||client.nombre||""}, NIF ${client.nif||""}:
+${consent1?"[X]":"[ ]"} CONSIENTO el tratamiento de mis datos.
+${consent2?"[X]":"[ ]"} AUTORIZO la gestion de presencia digital.
+${consent3?"[X]":"[ ]"} ${comercial==="autorizo"?"AUTORIZO":"NO AUTORIZO"} comunicaciones comerciales.
 
 En ${client.ciudadFiscal||"_____________"}, a ${dateStr}.
 
-
-
-Firma del cliente:                          Firma del responsable:
-
-
-_________________________              _________________________
-${client.contacto||client.nombre||""}              ${empresa}
-NIF: ${client.nif||""}                      CIF: ${cifEmpresa}`;
+Firma cliente:                          Firma responsable:
+_________________________               _________________________
+${client.contacto||client.nombre||""}                              ${empresa}
+NIF: ${client.nif||""}                                CIF: ${cifEmpresa}`;
 
   const buildHTML=()=>`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><title>LOPD - ${client.nombre}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:Georgia,'Times New Roman',serif;padding:50px 70px;line-height:1.7;font-size:12.5px;color:#1a1a1a;max-width:820px;margin:auto}
-h1{font-size:16px;text-align:center;margin-bottom:4px;letter-spacing:1px}
-h2{font-size:11px;text-align:center;color:#555;margin-bottom:30px;font-weight:400}
-h3{font-size:13px;margin:24px 0 8px;border-bottom:1px solid #ccc;padding-bottom:4px}
-.header{border:2px solid #333;padding:20px 30px;margin-bottom:30px;text-align:center}
-.sig{display:flex;justify-content:space-between;margin-top:60px}
-.sig-box{width:45%;text-align:center}
-.sig-line{border-bottom:1px solid #333;height:50px;margin-bottom:6px}
-.sig-name{font-size:11px;color:#555}
-.footer{text-align:center;margin-top:40px;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:12px}
-p{margin:3px 0}
-@media print{body{padding:30px 50px}button,.no-print{display:none!important}}
+body{font-family:Georgia,serif;padding:50px 70px;line-height:1.7;font-size:12.5px;color:#1a1a1a;max-width:820px;margin:auto}
+h1{font-size:16px;text-align:center;margin-bottom:4px}
+.header{border:2px solid #333;padding:20px;margin-bottom:30px;text-align:center}
+.footer{text-align:center;margin-top:40px;font-size:10px;color:#999;padding-top:12px;border-top:1px solid #ddd}
+@media print{body{padding:30px 50px}.no-print{display:none}}
 </style></head><body>
-<div class="header">
-<h1>DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION</h1>
-<h2>Proteccion de Datos Personales - RGPD (UE 2016/679) y LOPDGDD (LO 3/2018)</h2>
-</div>
+<div class="header"><h1>DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION</h1></div>
 ${buildPlainText().split("\n").map(l=>"<p>"+(l||"&nbsp;").replace(/</g,"&lt;")+"</p>").join("\n")}
 <div class="footer">Documento generado el ${dateStr} - ${empresa}</div>
 <script>setTimeout(()=>window.print(),500)<\/script>
 </body></html>`;
 
   const printDoc=()=>{const w=window.open("","_blank");if(!w)return;w.document.write(buildHTML());w.document.close();};
-
-  const downloadPDF=()=>{printDoc();};
-
   const copyDoc=()=>{
     const txt=buildPlainText();
     if(navigator.clipboard&&navigator.clipboard.writeText){
       navigator.clipboard.writeText(txt).then(()=>{setFeedback("Copiado!");setTimeout(()=>setFeedback(""),2000);}).catch(()=>fbCopy(txt));
-    }else{fbCopy(txt);}
+    }else fbCopy(txt);
   };
   const fbCopy=(txt)=>{const ta=document.createElement("textarea");ta.value=txt;ta.style.cssText="position:fixed;left:-9999px";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");setFeedback("Copiado!");}catch(e){}document.body.removeChild(ta);setTimeout(()=>setFeedback(""),2000);};
-
   const saveDoc=()=>{
     if(onSave) onSave(buildPlainText());
     setFeedback("Guardado en biblioteca!");
@@ -1618,7 +1547,7 @@ ${buildPlainText().split("\n").map(l=>"<p>"+(l||"&nbsp;").replace(/</g,"&lt;")+"
           {feedback&&<span style={{fontSize:11,color:C.green,fontWeight:600}}>{feedback}</span>}
           <Btn small primary color={C.gold} onClick={saveDoc}>Guardar</Btn>
           <Btn small primary color={C.green} onClick={copyDoc}>Copiar</Btn>
-          <Btn small primary color={C.blue} onClick={downloadPDF}>Imprimir / PDF</Btn>
+          <Btn small primary color={C.blue} onClick={printDoc}>Imprimir / PDF</Btn>
           <Btn small onClick={onClose}>Cerrar</Btn>
         </div>
       </div>
@@ -1626,100 +1555,51 @@ ${buildPlainText().split("\n").map(l=>"<p>"+(l||"&nbsp;").replace(/</g,"&lt;")+"
       <div style={{padding:24}}>
         <div style={{textAlign:"center",padding:"16px 20px",border:"2px solid "+C.teal,borderRadius:10,marginBottom:24}}>
           <div style={{fontSize:15,fontWeight:700,color:C.w,letterSpacing:1}}>DOCUMENTO DE CONSENTIMIENTO Y AUTORIZACION</div>
-          <div style={{fontSize:12,color:C.txD,marginTop:4}}>Proteccion de Datos Personales - RGPD (UE 2016/679) y LOPDGDD (LO 3/2018)</div>
+          <div style={{fontSize:12,color:C.txD,marginTop:4}}>Proteccion de Datos - RGPD (UE 2016/679) y LOPDGDD (LO 3/2018)</div>
         </div>
 
         <Crd sx={{marginBottom:16}}>
-          <h4 style={{fontSize:13,fontWeight:700,color:C.teal,margin:"0 0 10px"}}>1. DATOS DEL RESPONSABLE DEL TRATAMIENTO</h4>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 20px",fontSize:13}}>
-            <div><span style={{color:C.txD}}>Razon social:</span> <span style={{color:C.w}}>{empresa}</span></div>
-            <div><span style={{color:C.txD}}>CIF/NIF:</span> <span style={{color:C.w}}>{cifEmpresa}</span></div>
-            <div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Domicilio:</span> <span style={{color:C.w}}>{dirEmpresa}</span></div>
-            <div><span style={{color:C.txD}}>Email:</span> <span style={{color:C.w}}>{emailEmpresa}</span></div>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.teal,margin:"0 0 10px"}}>1. RESPONSABLE</h4>
+          <div style={{fontSize:13,color:C.tx}}>
+            <p><span style={{color:C.w,fontWeight:600}}>{empresa}</span> - CIF: {cifEmpresa}</p>
+            <p>{dirEmpresa} - Email: {emailEmpresa}</p>
           </div>
         </Crd>
 
         <Crd sx={{marginBottom:16}}>
-          <h4 style={{fontSize:13,fontWeight:700,color:C.blue,margin:"0 0 10px"}}>2. DATOS DEL INTERESADO (CLIENTE)</h4>
+          <h4 style={{fontSize:13,fontWeight:700,color:C.blue,margin:"0 0 10px"}}>2. INTERESADO</h4>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 20px",fontSize:13}}>
             <div><span style={{color:C.txD}}>Nombre:</span> <span style={{color:C.w}}>{client.nombre||"-"}</span></div>
-            <div><span style={{color:C.txD}}>NIF/CIF:</span> <span style={{color:C.w}}>{client.nif||"-"}</span></div>
-            <div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Domicilio:</span> <span style={{color:C.w}}>{client.dirFiscal||"-"}, {client.cpFiscal||""} {client.ciudadFiscal||"-"} ({client.provinciaFiscal||""})</span></div>
+            <div><span style={{color:C.txD}}>NIF:</span> <span style={{color:C.w}}>{client.nif||"-"}</span></div>
+            <div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Direccion:</span> <span style={{color:C.w}}>{client.dirFiscal||"-"}, {client.cpFiscal||""} {client.ciudadFiscal||"-"}</span></div>
             <div><span style={{color:C.txD}}>Email:</span> <span style={{color:C.w}}>{client.email||"-"}</span></div>
             <div><span style={{color:C.txD}}>Telefono:</span> <span style={{color:C.w}}>{client.telefono||"-"}</span></div>
-            <div><span style={{color:C.txD}}>Contacto:</span> <span style={{color:C.w}}>{client.contacto||"-"}</span></div>
-            <div><span style={{color:C.txD}}>Cargo:</span> <span style={{color:C.w}}>{client.cargoContacto||"-"}</span></div>
-          </div>
-        </Crd>
-
-        <Crd sx={{marginBottom:16}}>
-          <h4 style={{fontSize:13,fontWeight:700,color:C.purple,margin:"0 0 10px"}}>3-4. FINALIDAD Y BASE JURIDICA</h4>
-          <div style={{fontSize:13,color:C.tx,lineHeight:1.7}}>
-            <p>a) Gestion de la relacion contractual (Plan: <span style={{color:C.w,fontWeight:600}}>{client.plan||"-"}</span>)</p>
-            <p>b) Facturacion y cobro de servicios</p>
-            <p>c) Presencia digital y reputacion online</p>
-            <p>d) Creacion y gestion de contenido digital</p>
-            <p>e) Comunicaciones de servicio</p>
-            <p style={{marginTop:8,fontSize:12,color:C.txD}}>Base: Art. 6.1.b) contrato, Art. 6.1.a) consentimiento, Art. 6.1.c) obligacion legal</p>
-          </div>
-        </Crd>
-
-        <Crd sx={{marginBottom:16}}>
-          <h4 style={{fontSize:13,fontWeight:700,color:C.cyan,margin:"0 0 10px"}}>5-7. CONSERVACION, DESTINATARIOS Y DERECHOS</h4>
-          <div style={{fontSize:12,color:C.tx,lineHeight:1.7}}>
-            <p><span style={{color:C.w,fontWeight:600}}>Conservacion:</span> Vigencia contractual + plazos legales (4a fiscal, 5a contractual, 3a datos personales)</p>
-            <p style={{marginTop:4}}><span style={{color:C.w,fontWeight:600}}>Destinatarios:</span> Administraciones publicas, proveedores tecnologicos. Sin transferencias fuera del EEE.</p>
-            <p style={{marginTop:4}}><span style={{color:C.w,fontWeight:600}}>Derechos:</span> Acceso, rectificacion, supresion, limitacion, portabilidad, oposicion. Ejercicio: {emailEmpresa}. Reclamaciones: AEPD (www.aepd.es)</p>
           </div>
         </Crd>
 
         <Crd sx={{marginBottom:16,border:"2px solid "+C.teal}}>
           <h4 style={{fontSize:13,fontWeight:700,color:C.green,margin:"0 0 12px"}}>8. CONSENTIMIENTO</h4>
-          <p style={{fontSize:13,color:C.tx,marginBottom:12}}>D./Da. <span style={{color:C.w,fontWeight:600}}>{client.contacto||client.nombre||"_________"}</span>, con NIF <span style={{color:C.w,fontWeight:600}}>{client.nif||"_________"}</span>, en calidad de {client.cargoContacto||"representante legal"} de <span style={{color:C.w,fontWeight:600}}>{client.nombre||"_________"}</span>:</p>
-          <LopdChk checked={consent1} onChange={setConsent1} label="CONSIENTO expresamente el tratamiento de mis datos personales para las finalidades descritas."/>
+          <LopdChk checked={consent1} onChange={setConsent1} label="CONSIENTO el tratamiento de mis datos personales para las finalidades descritas."/>
           <LopdChk checked={consent2} onChange={setConsent2} label="AUTORIZO la gestion de la presencia digital de mi negocio en las plataformas acordadas."/>
-          <div style={{marginTop:8,marginBottom:4}}>
+          <div style={{marginTop:8}}>
             <Fld label="Comunicaciones comerciales">
               <Sel value={comercial} onChange={setComercial} opts={[{v:"autorizo",l:"AUTORIZO comunicaciones comerciales"},{v:"no_autorizo",l:"NO AUTORIZO comunicaciones comerciales"}]}/>
             </Fld>
           </div>
-          <LopdChk checked={consent3} onChange={setConsent3} label={comercial==="autorizo"?"AUTORIZO el envio de comunicaciones comerciales sobre servicios propios.":"NO AUTORIZO el envio de comunicaciones comerciales."}/>
+          <LopdChk checked={consent3} onChange={setConsent3} label={comercial==="autorizo"?"AUTORIZO el envio de comunicaciones comerciales.":"NO AUTORIZO el envio de comunicaciones comerciales."}/>
         </Crd>
 
-        <Crd sx={{marginBottom:16}}>
-          <div style={{marginBottom:20}}>
-            <Fld label="Fecha del documento">
-              <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                <span style={{fontSize:13,color:C.tx}}>En <span style={{color:C.w,fontWeight:600}}>{client.ciudadFiscal||"_____________"}</span>, a</span>
-                <input type="text" value={docDate} onChange={e=>setDocDate(e.target.value)} placeholder="28/02/2026" style={{background:C.sf,border:"1px solid "+C.teal,color:C.w,padding:"8px 12px",borderRadius:6,fontFamily:font,fontSize:14,fontWeight:600,outline:"none",width:160,textAlign:"center"}}/>
-                <input type="date" value={docDate.includes("-")?docDate:""} onChange={e=>setDocDate(e.target.value)} style={{background:C.sf,border:"1px solid "+C.bd,color:C.w,padding:"6px 8px",borderRadius:6,fontFamily:font,fontSize:12,outline:"none",width:40,cursor:"pointer",opacity:0.6}} title="Selector de fecha"/>
-              </div>
-            </Fld>
-            <p style={{fontSize:11,color:C.txD,marginTop:4}}>Escribe la fecha directamente o usa el selector. Aparece en el documento como: <span style={{color:C.teal}}>{dateStr}</span></p>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:40}}>
-            <div style={{textAlign:"center"}}>
-              <p style={{fontSize:11,color:C.txD,marginBottom:8}}>Firma del cliente</p>
-              <div style={{height:80,border:"1px dashed "+C.bd,borderRadius:8,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <span style={{fontSize:11,color:C.txD,fontStyle:"italic"}}>Espacio para firma</span>
-              </div>
-              <p style={{fontSize:12,color:C.w}}>{client.contacto||client.nombre||""}</p>
-              <p style={{fontSize:11,color:C.txD}}>NIF: {client.nif||""}</p>
+        <Crd>
+          <Fld label="Fecha del documento">
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <span style={{fontSize:13,color:C.tx}}>En <span style={{color:C.w,fontWeight:600}}>{client.ciudadFiscal||"_____________"}</span>, a</span>
+              <input type="date" value={docDate} onChange={e=>setDocDate(e.target.value)} style={{background:C.sf,border:"1px solid "+C.teal,color:C.w,padding:"8px 12px",borderRadius:6,fontFamily:font,fontSize:13,outline:"none"}}/>
             </div>
-            <div style={{textAlign:"center"}}>
-              <p style={{fontSize:11,color:C.txD,marginBottom:8}}>Firma del responsable</p>
-              <div style={{height:80,border:"1px dashed "+C.bd,borderRadius:8,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <span style={{fontSize:11,color:C.txD,fontStyle:"italic"}}>Espacio para firma</span>
-              </div>
-              <p style={{fontSize:12,color:C.w}}>{empresa}</p>
-              <p style={{fontSize:11,color:C.txD}}>CIF: {cifEmpresa}</p>
-            </div>
-          </div>
+          </Fld>
+          <p style={{fontSize:11,color:C.txD,marginTop:4}}>En el documento aparece como: <span style={{color:C.teal}}>{dateStr}</span></p>
         </Crd>
 
-        <div style={{textAlign:"center",padding:16,fontSize:11,color:C.txD}}>
-          Documento generado el {dateStr} - {empresa}
-        </div>
+        <div style={{textAlign:"center",padding:16,fontSize:11,color:C.txD}}>Documento generado el {dateStr} - {empresa}</div>
       </div>
     </div>
   </div>;
@@ -1727,1124 +1607,664 @@ ${buildPlainText().split("\n").map(l=>"<p>"+(l||"&nbsp;").replace(/</g,"&lt;")+"
 
 /* ══════ CLIENTS ══════ */
 function Clients(){
-  const emptyClient = {
-    nombre:"",nif:"",dirFiscal:"",cpFiscal:"",ciudadFiscal:"",provinciaFiscal:"",
-    email:"",telefono:"",web:"",contacto:"",cargoContacto:"",
-    nicho:"",plan:"Esencial",servicios:"",formaPago:"Transferencia",iban:"",
-    fechaAlta:new Date().toISOString().split("T")[0],notas:"",
-    empresa:"Cliniq Digital",emailEmpresa:"info@cliniqdigital.com",telEmpresa:"",cifEmpresa:"",
-    presupuesto:"",cuotaMensual:""
-  };
-  const mask=(val)=>{if(!val||val.length<4) return val||"-";return val.slice(0,2)+"*".repeat(Math.max(val.length-4,2))+val.slice(-2);};
-  const[cls,setCls]=useState([]);
-  const[show,setShow]=useState(false);
-  const[f,setF]=useState({...emptyClient});
   const[tab,setTab]=useState("list");
+  const[cls,setCls]=useState([]);
   const[sel,setSel]=useState(null);
-  const[logFilter,setLogFilter]=useState("all");
-  const[editId,setEditId]=useState(null);
-  const[editLog,setEditLog]=useState(null);
-  const[,forceUpdate]=useState(0);
-  const[logSearch,setLogSearch]=useState("");
-  const[logToolFilter,setLogToolFilter]=useState("all");
+  const[edit,setEdit]=useState(null);
+  const[isNew,setIsNew]=useState(false);
+  const[clientSearch,setClientSearch]=useState("");
+  const[logClientFilter,setLogClientFilter]=useState("");
+  const[clientLibrary,setClientLibrary]=useState([]);
   const[shareLink,setShareLink]=useState("");
   const[lopdClient,setLopdClient]=useState(null);
-  const[clientSearch,setClientSearch]=useState("");
+  const[briefClient,setBriefClient]=useState(null);
 
-  useEffect(()=>{
-    db.getClients().then(data=>{
-      if(data&&data.length>0){
-        setCls(data.map(r=>({
-          id:r.id,nombre:r.nombre||"",nif:r.nif||"",dirFiscal:r.dir_fiscal||"",cpFiscal:r.cp_fiscal||"",
-          ciudadFiscal:r.ciudad_fiscal||"",provinciaFiscal:r.provincia_fiscal||"",email:r.email||"",
-          telefono:r.telefono||"",web:r.web||"",contacto:r.contacto||"",cargoContacto:r.cargo_contacto||"",
-          nicho:r.nicho||"",plan:r.plan||"Esencial",servicios:r.servicios||"",formaPago:r.forma_pago||"Transferencia",
-          iban:r.iban||"",fechaAlta:r.fecha_alta||"",notas:r.notas||"",
-          empresa:r.empresa||"Cliniq Digital",emailEmpresa:r.email_empresa||"",telEmpresa:r.tel_empresa||"",cifEmpresa:r.cif_empresa||"",
-          presupuesto:r.presupuesto||"",cuotaMensual:r.cuota_mensual||""
-        })));
-      }
-    }).catch(()=>{});
-  },[]);
+  useEffect(()=>{db.getClients().then(d=>setCls(d||[]));},[]);
 
-  const updF=(key,val)=>setF(prev=>({...prev,[key]:val}));
+  const fields=[
+    {gp:"Datos básicos",f:[{k:"nombre",l:"Nombre",ph:"Clínica Dental Sonrisa"},{k:"nicho",l:"Nicho",ph:"Odontología"},{k:"plan",l:"Plan",sel:PLANS.map(p=>p.lb)}]},
+    {gp:"Datos fiscales",f:[{k:"empresa",l:"Razón Social",ph:"S.L./S.A."},{k:"nif",l:"NIF / CIF",ph:"B12345678"},{k:"dirFiscal",l:"Dirección",ph:"C/ Mayor 15"},{k:"cpFiscal",l:"CP",ph:"03001"},{k:"ciudadFiscal",l:"Ciudad",ph:"Alicante"},{k:"provinciaFiscal",l:"Provincia",ph:"Alicante"}]},
+    {gp:"Contacto comercial",f:[{k:"contacto",l:"Nombre contacto",ph:"María García"},{k:"cargoContacto",l:"Cargo",ph:"Gerente"},{k:"email",l:"Email",ph:"info@ejemplo.es"},{k:"telefono",l:"Teléfono",ph:"+34 600 000 000"}]},
+    {gp:"Servicio acordado",f:[{k:"fechaInicio",l:"Fecha alta",ph:"2026-02-01",type:"date"},{k:"fechaFin",l:"Fin contrato",ph:"2026-02-01",type:"date"},{k:"importeMensual",l:"Importe mensual €"},{k:"formaPago",l:"Forma pago",sel:["Domiciliación SEPA","Transferencia mensual","Stripe / tarjeta","Bizum","Otro"]},{k:"diaFactura",l:"Día factura",ph:"1, 15..."}]},
+    {gp:"Notas",f:[{k:"notas",l:"Notas internas",txa:true}]}
+  ];
 
-  const[saveError,setSaveError]=useState("");
-
-  const save=()=>{
-    if(!f.nombre){setSaveError("Falta el nombre del cliente");return;}
-    if(!f.nif){setSaveError("Falta el NIF/CIF");return;}
-    setSaveError("");
-    if(editId){
-      setCls(prev=>prev.map(c=>c.id===editId?{...f,id:editId}:c));
-      db.updateClient&&db.updateClient(editId,f).catch(()=>{});
-      setEditId(null);setF({...emptyClient});setShow(false);
-    }else{
-      const newClient={...f,id:Date.now()};
-      setCls(prev=>[...prev,newClient]);
-      setF({...emptyClient});setShow(false);
-      db.createClient(f).then(saved=>{
-        if(saved){setCls(prev=>prev.map(c=>c.id===newClient.id?{...newClient,id:saved.id}:c));}
-      }).catch(()=>{});
-    }
+  const startEdit=(c)=>{setEdit({...c});setIsNew(false);setSel(c.id);setTab("list");};
+  const startNew=()=>{const blank={};fields.forEach(g=>g.f.forEach(f=>blank[f.k]=""));setEdit({...blank,plan:"Profesional",formaPago:"Domiciliación SEPA"});setIsNew(true);setSel(null);setTab("list");};
+  const save=async()=>{
+    if(!edit)return;
+    try{
+      const saved=await db.saveClient(edit);
+      const list=await db.getClients();
+      setCls(list||[]);
+      setSel(saved?.id);
+      setEdit(null);setIsNew(false);
+    }catch(e){alert("Error guardando: "+e.message);}
   };
-  const startEdit=(c)=>{setF({...c});setEditId(c.id);setShow(true);setSel(null);};
-  const deleteClient=(id)=>{
-    if(!confirm("Eliminar este cliente?")) return;
-    setCls(prev=>prev.filter(c=>c.id!==id));
-    db.deleteClient&&db.deleteClient(id).catch(()=>{});
-    setSel(null);
-  };
-  const deleteLog=(idx)=>{
-    ACTIVITY_LOG.splice(idx,1);
-    db.deleteActivity&&db.deleteActivity(idx).catch(()=>{});
-    forceUpdate(n=>n+1);
-  };
-  const clearAllLogs=()=>{
-    if(!confirm("Borrar TODO el registro de actividad?")) return;
-    ACTIVITY_LOG.length=0;
-    db.clearActivity&&db.clearActivity().catch(()=>{});
-    forceUpdate(n=>n+1);
+  const remove=async()=>{
+    if(!sel)return;
+    if(!confirm("Eliminar este cliente y todos sus datos asociados?"))return;
+    try{
+      await db.deleteClient(sel);
+      const list=await db.getClients();
+      setCls(list||[]);
+      setSel(null);setEdit(null);
+    }catch(e){alert("Error eliminando: "+e.message);}
   };
   const saveLOPD=(text)=>{
-    logActivity("LOPD / Proteccion de Datos",lopdClient?lopdClient.nombre:"Sin asignar",{tipo:"LOPD",fecha:new Date().toISOString()},text,{provider:"manual",model:"lopd"});
-    forceUpdate(n=>n+1);
+    if(!lopdClient)return;
+    const entry={
+      id:Date.now()+Math.random(),date:new Date().toISOString(),
+      tool:"LOPD/RGPD",client:lopdClient.nombre,
+      inputs:{tipo:"Documento legal"},
+      preview:text.slice(0,300),fullOutput:text,
+      provider:"system",model:"lopd-generator",estCost:0
+    };
+    ACTIVITY_LOG.push(entry);
+    db.logActivity({tool:entry.tool,client:entry.client,inputs:entry.inputs,preview:entry.preview,fullOutput:entry.fullOutput,provider:entry.provider,model:entry.model,estCost:entry.estCost}).catch(()=>{});
+    setLopdClient(null);
   };
 
-  const allLog=ACTIVITY_LOG;
-  const filteredLog=logFilter==="all"?allLog:getLogForClient(logFilter);
-  const clientNames=[...new Set(allLog.map(e=>e.client))].filter(n=>n!=="Sin asignar");
-  const filteredCls=clientSearch?cls.filter(c=>
-    (c.nombre||"").toLowerCase().includes(clientSearch.toLowerCase())||
-    (c.nicho||"").toLowerCase().includes(clientSearch.toLowerCase())||
-    (c.ciudadFiscal||"").toLowerCase().includes(clientSearch.toLowerCase())||
-    (c.email||"").toLowerCase().includes(clientSearch.toLowerCase())
-  ):cls;
+  const generateShareLink=async(c)=>{
+    try{
+      const r=await fetch("/api/client-view",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({clientId:c.id,clientName:c.nombre})
+      });
+      if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||"Error generando enlace");}
+      const data=await r.json();
+      setShareLink(data.url);
+      navigator.clipboard.writeText(data.url).catch(()=>{});
+    }catch(e){alert("Error: "+e.message);}
+  };
 
-  const totalMRR=cls.reduce((s,c)=>s+parseFloat(c.cuotaMensual||0),0);
+  const cliFiltrados=cls.filter(c=>{
+    if(!clientSearch.trim())return true;
+    const q=clientSearch.toLowerCase();
+    return (c.nombre||"").toLowerCase().includes(q)||
+           (c.nicho||"").toLowerCase().includes(q)||
+           (c.contacto||"").toLowerCase().includes(q)||
+           (c.email||"").toLowerCase().includes(q);
+  });
+
+  const allLogClients=Array.from(new Set(ACTIVITY_LOG.map(e=>e.client))).sort();
+  const filteredLog=logClientFilter?ACTIVITY_LOG.filter(e=>e.client===logClientFilter):ACTIVITY_LOG;
 
   return <div>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:12}}>
-      <div>
-        <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:0}}>Gestion de Clientes</h3>
-        <p style={{fontSize:13,color:C.tx,margin:"4px 0 0"}}>{cls.length} clientes - {totalMRR>0?totalMRR.toFixed(0)+" EUR/mes MRR - ":""}{allLog.length} contenidos generados</p>
-      </div>
-      <Btn primary onClick={()=>{setShow(true);setSel(null);setEditId(null);setF({...emptyClient});}}>+ Nuevo Cliente</Btn>
-    </div>
+    <h2 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 12px"}}>Clientes</h2>
+    <Tab tabs={[
+      {id:"list",lb:"Lista de clientes"},
+      {id:"log",lb:"Log general"},
+      {id:"logclient",lb:"Log por cliente"},
+      {id:"library",lb:"Biblioteca"}
+    ]} active={tab} onChange={setTab}/>
 
-    <Tab tabs={[{id:"list",lb:"Clientes ("+cls.length+")"},{id:"log",lb:"Biblioteca ("+allLog.length+")"},{id:"logclient",lb:"Log por Cliente"}]} active={tab} onChange={setTab}/>
-
-    {tab==="list"&&show&&<Crd sx={{marginBottom:20}}>
-      <h4 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 16px"}}>{editId?"Editar Cliente":"Nuevo Cliente"}</h4>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:16}}>
-        <Fld label="Nombre / Razon Social *"><Inp value={f.nombre} onChange={v=>updF("nombre",v)} ph="Nombre"/></Fld>
-        <Fld label="NIF / CIF *"><Inp value={f.nif} onChange={v=>updF("nif",v)} ph="B12345678"/></Fld>
-        <Fld label="Direccion Fiscal"><Inp value={f.dirFiscal} onChange={v=>updF("dirFiscal",v)} ph="C/ Mayor 15"/></Fld>
-        <Fld label="CP"><Inp value={f.cpFiscal} onChange={v=>updF("cpFiscal",v)} ph="03001"/></Fld>
-        <Fld label="Ciudad"><Inp value={f.ciudadFiscal} onChange={v=>updF("ciudadFiscal",v)} ph="Alicante"/></Fld>
-        <Fld label="Provincia"><Inp value={f.provinciaFiscal} onChange={v=>updF("provinciaFiscal",v)} ph="Alicante"/></Fld>
-        <Fld label="Email"><Inp value={f.email} onChange={v=>updF("email",v)} ph="info@clinica.es"/></Fld>
-        <Fld label="Telefono"><Inp value={f.telefono} onChange={v=>updF("telefono",v)} ph="+34 600 000 000"/></Fld>
-        <Fld label="Web"><Inp value={f.web} onChange={v=>updF("web",v)} ph="www.clinica.es"/></Fld>
-        <Fld label="Contacto"><Inp value={f.contacto} onChange={v=>updF("contacto",v)} ph="Nombre responsable"/></Fld>
-        <Fld label="Cargo contacto"><Inp value={f.cargoContacto} onChange={v=>updF("cargoContacto",v)} ph="Director/a, Gerente..."/></Fld>
-        <Fld label="Nicho"><Sel value={f.nicho} onChange={v=>updF("nicho",v)} opts={NICHES.map(n=>n.lb)} ph="Sector..."/></Fld>
-        <Fld label="Plan"><Sel value={f.plan} onChange={v=>updF("plan",v)} opts={PLANS.map(p=>({value:p.lb,label:p.lb+" ("+p.price+" EUR)"}))}/></Fld>
-        <Fld label="Presupuesto total (EUR)"><Inp value={f.presupuesto} onChange={v=>updF("presupuesto",v)} ph="Ej: 3000"/></Fld>
-        <Fld label="Cuota mensual (EUR)"><Inp value={f.cuotaMensual} onChange={v=>updF("cuotaMensual",v)} ph="Ej: 497"/></Fld>
-        <Fld label="Forma pago"><Sel value={f.formaPago} onChange={v=>updF("formaPago",v)} opts={["Transferencia","Domiciliacion","Tarjeta","Efectivo"]}/></Fld>
-        <Fld label="Fecha alta"><Inp value={f.fechaAlta} onChange={v=>updF("fechaAlta",v)} type="date"/></Fld>
-        <Fld label="Empresa (responsable LOPD)"><Inp value={f.empresa} onChange={v=>updF("empresa",v)} ph="Cliniq Digital"/></Fld>
-        <Fld label="CIF empresa"><Inp value={f.cifEmpresa} onChange={v=>updF("cifEmpresa",v)} ph="B12345678"/></Fld>
-        <Fld label="Email empresa"><Inp value={f.emailEmpresa} onChange={v=>updF("emailEmpresa",v)} ph="info@cliniqdigital.com"/></Fld>
+    {tab==="list"&&<div>
+      <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+        <Btn primary color={C.teal} onClick={startNew}>+ Nuevo cliente</Btn>
+        <div style={{flex:1,minWidth:200,maxWidth:400}}>
+          <Inp value={clientSearch} onChange={setClientSearch} ph="Buscar por nombre, nicho, contacto..."/>
+        </div>
+        <span style={{fontSize:12,color:C.tx,alignSelf:"center"}}>{cliFiltrados.length} de {cls.length}</span>
       </div>
-      <Fld label="Servicios contratados"><Txa value={f.servicios} onChange={v=>updF("servicios",v)} ph="SEO local, redes sociales, Google Ads..." rows={2}/></Fld>
-      <div style={{marginTop:8}}><Fld label="Notas"><Txa value={f.notas} onChange={v=>updF("notas",v)} ph="Observaciones..." rows={2}/></Fld></div>
-      <div style={{marginTop:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-        <Btn primary onClick={save}>{editId?"Actualizar Cliente":"Guardar Cliente"}</Btn>
-        <Btn onClick={()=>{setShow(false);setEditId(null);setF({...emptyClient});setSaveError("");}}>Cancelar</Btn>
-        {saveError&&<span style={{fontSize:12,color:C.red,fontWeight:600}}>{saveError}</span>}
-      </div>
-    </Crd>}
 
-    {tab==="list"&&!show&&cls.length>0&&<div style={{marginBottom:12}}>
-      <Inp value={clientSearch} onChange={setClientSearch} ph={"Buscar entre "+cls.length+" clientes (nombre, sector, ciudad, email)..."}/>
+      {edit&&<Crd sx={{marginBottom:16,border:"2px solid "+C.teal}}>
+        <h4 style={{fontSize:14,fontWeight:700,color:C.teal,margin:"0 0 14px"}}>{isNew?"Nuevo cliente":"Editando: "+edit.nombre}</h4>
+        {fields.map(g=><div key={g.gp} style={{marginBottom:18}}>
+          <p style={{fontSize:11,color:C.gold,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase",marginBottom:8}}>{g.gp}</p>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+            {g.f.map(f=><div key={f.k}>
+              <Lbl>{f.l}</Lbl>
+              {f.sel?<Sel value={edit[f.k]||""} onChange={v=>setEdit({...edit,[f.k]:v})} opts={f.sel}/>
+              :f.txa?<Txa value={edit[f.k]||""} onChange={v=>setEdit({...edit,[f.k]:v})} ph={f.ph||""} rows={3}/>
+              :<Inp value={edit[f.k]||""} onChange={v=>setEdit({...edit,[f.k]:v})} ph={f.ph||""} type={f.type||"text"}/>}
+            </div>)}
+          </div>
+        </div>)}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <Btn primary color={C.green} onClick={save}>Guardar</Btn>
+          <Btn onClick={()=>{setEdit(null);setIsNew(false);}}>Cancelar</Btn>
+          {!isNew&&<Btn primary color={C.red} onClick={remove}>Eliminar</Btn>}
+        </div>
+      </Crd>}
+
+      {shareLink&&<div style={{marginBottom:14,padding:"12px 16px",background:bg8(C.green),border:"1px solid "+C.green,borderRadius:8}}>
+        <p style={{fontSize:12,color:C.green,fontWeight:600,margin:"0 0 4px"}}>Enlace copiado al portapapeles</p>
+        <p style={{fontSize:11,color:C.tx,margin:0,wordBreak:"break-all"}}>{shareLink}</p>
+      </div>}
+
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {cliFiltrados.length===0?<Crd sx={{textAlign:"center"}}><p style={{color:C.txD,margin:0,fontSize:13}}>No hay clientes que coincidan con la búsqueda.</p></Crd>
+        :cliFiltrados.map(c=><Crd key={c.id} sx={{cursor:"pointer",border:sel===c.id?"2px solid "+C.teal:"1px solid "+C.bd}} onClick={()=>setSel(sel===c.id?null:c.id)}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+            <div style={{flex:1,minWidth:200}}>
+              <h4 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 4px"}}>{c.nombre||"(Sin nombre)"}</h4>
+              <p style={{fontSize:12,color:C.tx,margin:0}}>{c.nicho||"-"} · {c.ciudadFiscal||c.ciudad_fiscal||"-"}</p>
+            </div>
+            <Badge text={c.plan||"Sin plan"} color={C.teal}/>
+          </div>
+          {sel===c.id&&<div style={{marginTop:14,paddingTop:14,borderTop:"1px solid "+C.bd}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:"6px 18px",fontSize:12,marginBottom:14}}>
+              <div><span style={{color:C.txD}}>Contacto:</span> <span style={{color:C.w}}>{c.contacto||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Email:</span> <span style={{color:C.w}}>{c.email||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Teléfono:</span> <span style={{color:C.w}}>{c.telefono||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Importe/mes:</span> <span style={{color:C.green}}>{c.importeMensual||c.importe_mensual||"-"} €</span></div>
+              <div><span style={{color:C.txD}}>NIF/CIF:</span> <span style={{color:C.w}}>{c.nif||"-"}</span></div>
+              <div><span style={{color:C.txD}}>Fecha alta:</span> <span style={{color:C.w}}>{c.fechaInicio||c.fecha_inicio||"-"}</span></div>
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}} onClick={e=>e.stopPropagation()}>
+              <Btn small primary color={C.blue} onClick={()=>startEdit(c)}>Editar</Btn>
+              <Btn small primary color={C.purple} onClick={()=>setBriefClient(c)}>Brief IA</Btn>
+              <Btn small primary color={C.teal} onClick={()=>setLopdClient(c)}>LOPD</Btn>
+              <Btn small primary color={C.gold} onClick={()=>generateShareLink(c)}>Vista cliente</Btn>
+              {(()=>{const clientLog=ACTIVITY_LOG.filter(e=>e.client===c.nombre);return clientLog.length>0&&<Btn small primary color={C.cyan} onClick={()=>exportLogPDF(clientLog,c.nombre)}>Log PDF</Btn>;})()}
+            </div>
+          </div>}
+        </Crd>)}
+      </div>
     </div>}
 
-    {tab==="list"&&filteredCls.map(c=>{
-      const clientLog=getLogForClient(c.nombre);
-      const toolsUsed=[...new Set(clientLog.map(e=>e.tool))];
-      return <div key={c.id} style={{background:sel===c.id?C.sf2:C.sf,border:"1px solid "+(sel===c.id?C.teal:C.bd),borderRadius:10,padding:"14px 20px",marginBottom:8,cursor:"pointer"}} onClick={()=>{setSel(sel===c.id?null:c.id);setShareLink("");}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
-          <div style={{display:"flex",alignItems:"center",gap:12}}>
-            <div style={{width:38,height:38,borderRadius:8,background:bg8(C.teal),display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:C.teal}}>{(c.nombre||"?")[0]}</div>
-            <div>
-              <div style={{fontSize:14,fontWeight:600,color:C.w}}>{c.nombre}</div>
-              <div style={{fontSize:12,color:C.tx}}>{c.ciudadFiscal||c.email||mask(c.nif)}</div>
-            </div>
-          </div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-            <Badge text={c.nicho||"Sin sector"} color={C.purple}/>
-            <Badge text={c.plan} color={c.plan==="Premium"?C.gold:c.plan==="Profesional"?C.blue:C.teal}/>
-            {c.cuotaMensual&&<Badge text={c.cuotaMensual+" EUR/mes"} color={C.green}/>}
-            {clientLog.length>0&&<Badge text={clientLog.length+" contenidos"} color={C.cyan}/>}
-          </div>
-        </div>
-        {sel===c.id&&<div style={{marginTop:16,paddingTop:16,borderTop:"1px solid "+C.bd}} onClick={e=>e.stopPropagation()}>
-          <div style={{background:C.bg,borderRadius:10,padding:16,marginBottom:14}}>
-            <p style={{fontSize:11,color:C.teal,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:10}}>Datos completos</p>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:8,fontSize:13}}>
-              <div><span style={{color:C.txD}}>NIF/CIF:</span> <span style={{color:C.w}}>{c.nif}</span></div>
-              <div><span style={{color:C.txD}}>Email:</span> <span style={{color:C.w}}>{c.email||"-"}</span></div>
-              <div><span style={{color:C.txD}}>Telefono:</span> <span style={{color:C.w}}>{c.telefono||"-"}</span></div>
-              <div><span style={{color:C.txD}}>Web:</span> <span style={{color:C.w}}>{c.web||"-"}</span></div>
-              <div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Direccion fiscal:</span> <span style={{color:C.w}}>{c.dirFiscal||"-"}, {c.cpFiscal||""} {c.ciudadFiscal||"-"} ({c.provinciaFiscal||""})</span></div>
-              <div><span style={{color:C.txD}}>Contacto:</span> <span style={{color:C.w}}>{c.contacto||"-"} {c.cargoContacto?"("+c.cargoContacto+")":""}</span></div>
-              <div><span style={{color:C.txD}}>Sector:</span> <span style={{color:C.purple}}>{c.nicho||"-"}</span></div>
-              <div><span style={{color:C.txD}}>Plan:</span> <span style={{color:C.w}}>{c.plan}</span></div>
-              <div><span style={{color:C.txD}}>Cuota mensual:</span> <span style={{color:C.green}}>{c.cuotaMensual?c.cuotaMensual+" EUR/mes":"-"}</span></div>
-              <div><span style={{color:C.txD}}>Presupuesto total:</span> <span style={{color:C.gold}}>{c.presupuesto?c.presupuesto+" EUR":"-"}</span></div>
-              <div><span style={{color:C.txD}}>Forma de pago:</span> <span style={{color:C.w}}>{c.formaPago||"-"}</span></div>
-              <div><span style={{color:C.txD}}>Fecha de alta:</span> <span style={{color:C.w}}>{c.fechaAlta||"-"}</span></div>
-              <div><span style={{color:C.txD}}>Empresa (LOPD):</span> <span style={{color:C.w}}>{c.empresa||"-"}</span></div>
-              <div><span style={{color:C.txD}}>CIF empresa:</span> <span style={{color:C.w}}>{c.cifEmpresa||"-"}</span></div>
-              <div><span style={{color:C.txD}}>Email empresa:</span> <span style={{color:C.w}}>{c.emailEmpresa||"-"}</span></div>
-              {c.servicios&&<div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Servicios contratados:</span> <span style={{color:C.w}}>{c.servicios}</span></div>}
-              {c.notas&&<div style={{gridColumn:"1/-1"}}><span style={{color:C.txD}}>Notas:</span> <span style={{color:C.w}}>{c.notas}</span></div>}
-            </div>
-          </div>
-
-          {toolsUsed.length>0&&<div style={{background:C.bg,borderRadius:10,padding:16,marginBottom:14}}>
-            <p style={{fontSize:11,color:C.cyan,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Herramientas usadas ({clientLog.length} contenidos generados)</p>
-            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-              {toolsUsed.map(t=>{const cnt=clientLog.filter(e=>e.tool===t).length;return <span key={t} style={{fontSize:10,padding:"4px 10px",borderRadius:4,background:bg8(C.cyan),color:C.cyan,fontWeight:600}}>{t} ({cnt})</span>;})}
-            </div>
-            {(()=>{const topics=[...new Set(clientLog.map(e=>(e.inputs&&typeof e.inputs==="object"?Object.values(e.inputs).filter(v=>typeof v==="string"&&v.length>2&&v.length<50):[]).flat()).flat())].filter(t=>t&&t.length>2).slice(0,15);
-              return topics.length>0?<div style={{marginTop:10}}>
-                <p style={{fontSize:10,color:C.txD,fontWeight:600,marginBottom:4}}>TEMAS TRABAJADOS</p>
-                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                  {topics.map((t,i)=><span key={i} style={{fontSize:10,padding:"2px 8px",borderRadius:3,background:bg8(C.purple),color:C.purple}}>{t}</span>)}
-                </div>
-              </div>:null;
-            })()}
-          </div>}
-
-          {clientLog.length>0&&<div style={{background:C.bg,borderRadius:10,padding:16,marginBottom:14}}>
-            <p style={{fontSize:11,color:C.gold,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>Ultimos trabajos realizados</p>
-            {clientLog.slice(-8).reverse().map((e,i)=>{
-              const d=new Date(e.date);
-              return <div key={i} style={{padding:"6px 10px",background:C.sf,borderRadius:6,marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{display:"flex",gap:8,alignItems:"center",flex:1,minWidth:0}}>
-                  <span style={{fontSize:10,fontWeight:700,color:C.bg,background:C.cyan,padding:"1px 6px",borderRadius:3,whiteSpace:"nowrap"}}>{e.tool}</span>
-                  <span style={{fontSize:11,color:C.tx,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{(e.preview||"").slice(0,100)}</span>
-                </div>
-                <span style={{fontSize:10,color:C.txD,whiteSpace:"nowrap",marginLeft:8}}>{d.toLocaleDateString("es-ES")}</span>
-              </div>;
-            })}
-            {clientLog.length>8&&<p style={{fontSize:10,color:C.txD,marginTop:4}}>...y {clientLog.length-8} mas. Ver todo en pestana "Biblioteca".</p>}
-          </div>}
-
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <Btn small primary color={C.blue} onClick={()=>startEdit(c)}>Editar</Btn>
-            <Btn small primary color={C.teal} onClick={()=>setLopdClient(c)}>LOPD</Btn>
-            {clientLog.length>0&&<Btn small primary color={C.cyan} onClick={()=>exportLogPDF(clientLog,c.nombre)}>Log PDF</Btn>}
-            <Btn small primary color={C.green} onClick={async()=>{
-              try{
-                const token=await db.getShareToken(c.id);
-                if(token){
-                  const url=window.location.origin+"/api/client-view?token="+token;
-                  setShareLink(url);
-                  try{await navigator.clipboard.writeText(url);}catch(e){}
-                }else{setShareLink("error");}
-              }catch(err){setShareLink("error");}
-            }}>Compartir</Btn>
-            <Btn small color={C.red} onClick={()=>deleteClient(c.id)}>Eliminar</Btn>
-          </div>
-          {shareLink&&shareLink!=="error"&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.teal,borderRadius:8,display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:11,color:C.teal,fontWeight:600}}>Enlace:</span>
-            <input readOnly value={shareLink} onClick={e=>e.target.select()} style={{fontSize:11,color:C.tx,flex:1,background:"transparent",border:"none",outline:"none",fontFamily:font}}/>
-            <span onClick={()=>window.open(shareLink,"_blank")} style={{fontSize:11,color:C.blue,cursor:"pointer"}}>Abrir</span>
-          </div>}
-          {shareLink==="error"&&<div style={{marginTop:8,padding:"8px 12px",background:C.bg,border:"1px solid "+C.rose,borderRadius:8}}>
-            <span style={{fontSize:11,color:C.rose}}>Error al generar enlace. Verifica que client-view.js este en api/.</span>
-          </div>}
-        </div>}
-      </div>;
-    })}
-    {tab==="list"&&filteredCls.length===0&&!show&&<Crd sx={{textAlign:"center",padding:40}}>
-      <p style={{color:C.txD,fontSize:14}}>{clientSearch?"Sin resultados para \""+clientSearch+"\"":"No hay clientes. Pulsa \"+ Nuevo Cliente\"."}</p>
-    </Crd>}
-
     {tab==="log"&&<div>
-      <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
-        <Inp value={logSearch} onChange={setLogSearch} ph="Buscar en contenido..."/>
-        <Sel value={logToolFilter} onChange={setLogToolFilter}
-          opts={[{v:"all",l:"Todas las herramientas"},...[...new Set(allLog.map(e=>e.tool))].sort().map(t=>({v:t,l:t}))]}/>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+        <p style={{fontSize:13,color:C.tx,margin:0}}>{ACTIVITY_LOG.length} entradas registradas</p>
+        {ACTIVITY_LOG.length>0&&<Btn small primary color={C.cyan} onClick={()=>exportLogPDF(ACTIVITY_LOG,null)}>Exportar PDF</Btn>}
       </div>
-      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-        <Btn small primary color={C.cyan} onClick={()=>exportLogPDF(allLog,"Todos")}>Exportar PDF</Btn>
-        {allLog.length>0&&<Btn small color={C.red} onClick={clearAllLogs}>Borrar todo</Btn>}
-        <span style={{fontSize:11,color:C.txD,marginLeft:"auto"}}>
-          {(()=>{const f2=allLog.filter(e=>{
-            if(logToolFilter!=="all"&&e.tool!==logToolFilter) return false;
-            if(logSearch&&!(e.fullOutput||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.tool||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.client||"").toLowerCase().includes(logSearch.toLowerCase())) return false;
-            return true;
-          });return f2.length+" de "+allLog.length+" contenidos";})()}
-        </span>
-      </div>
-      {allLog.length===0?<Crd sx={{textAlign:"center",padding:30}}><p style={{color:C.txD}}>Sin contenido generado. Usa cualquier herramienta para empezar tu biblioteca.</p></Crd>
-      :allLog.slice().reverse().filter(e=>{
-        if(logToolFilter!=="all"&&e.tool!==logToolFilter) return false;
-        if(logSearch&&!(e.fullOutput||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.tool||"").toLowerCase().includes(logSearch.toLowerCase())&&!(e.client||"").toLowerCase().includes(logSearch.toLowerCase())) return false;
-        return true;
-      }).map((e,idx)=>{
-        const realIdx=allLog.indexOf(e);
-        const d=new Date(e.date);
-        const isEditing=editLog===realIdx;
-        const provLabel=e.provider==="groq"?"Groq":e.provider==="deepseek"?"DeepSeek":e.provider==="fal"?"Fal.ai":"Claude";
-        const provColor=e.provider==="groq"?C.green:e.provider==="deepseek"?C.blue:e.provider==="fal"?C.orange:C.purple;
-        return <Crd key={e.id||idx} sx={{padding:12,marginBottom:6}}>
-          <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6,marginBottom:6}}>
-            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-              <span style={{fontSize:11,fontWeight:700,color:C.bg,background:C.cyan,padding:"2px 8px",borderRadius:4}}>{e.tool}</span>
-              <span style={{fontSize:12,color:C.w}}>{e.client}</span>
-              <span style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:provColor+"25",color:provColor}}>{provLabel}</span>
-              {e.estCost>0&&<span style={{fontSize:9,color:C.txD}}>${(e.estCost||0).toFixed(4)}</span>}
-            </div>
-            <span style={{fontSize:11,color:C.txD}}>{d.toLocaleDateString("es-ES")} {d.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})}</span>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {ACTIVITY_LOG.length===0?<Crd sx={{textAlign:"center"}}><p style={{color:C.txD,margin:0,fontSize:13}}>Sin actividad registrada todavía.</p></Crd>
+        :ACTIVITY_LOG.slice().reverse().slice(0,100).map(e=><Crd key={e.id}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:8}}>
+            <div><Badge text={e.tool} color={C.teal}/> <span style={{fontSize:12,color:C.tx,marginLeft:6}}>{e.client}</span></div>
+            <span style={{fontSize:11,color:C.txD}}>{new Date(e.date).toLocaleString("es-ES")}</span>
           </div>
-          {isEditing?<div>
-            <Txa value={e.fullOutput} onChange={v=>{ACTIVITY_LOG[realIdx].fullOutput=v;ACTIVITY_LOG[realIdx].preview=v.slice(0,300);forceUpdate(n=>n+1);}} rows={6}/>
-            <div style={{display:"flex",gap:6,marginTop:6}}>
-              <Btn small primary onClick={()=>setEditLog(null)}>Cerrar</Btn>
-            </div>
-          </div>:<div>
-            <div style={{fontSize:12,color:C.tx,lineHeight:1.5,maxHeight:60,overflow:"hidden"}}>{e.preview}</div>
-            <div style={{display:"flex",gap:6,marginTop:6}}>
-              <Btn small onClick={()=>{try{navigator.clipboard.writeText(e.fullOutput);}catch(err){const ta=document.createElement("textarea");ta.value=e.fullOutput;ta.style.cssText="position:fixed;left:-9999px";document.body.appendChild(ta);ta.select();document.execCommand("copy");document.body.removeChild(ta);}}}>Copiar</Btn>
-              <Btn small onClick={()=>setEditLog(realIdx)}>Ver / Editar</Btn>
-              <Btn small color={C.red} onClick={()=>deleteLog(realIdx)}>Borrar</Btn>
-            </div>
-          </div>}
-        </Crd>;
-      })}
+          {e.preview&&<p style={{fontSize:12,color:C.tx,margin:0,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{e.preview}{e.fullOutput&&e.fullOutput.length>300?"...":""}</p>}
+          <div style={{display:"flex",gap:14,fontSize:10,color:C.txD,marginTop:8,flexWrap:"wrap"}}>
+            <span>{e.provider||"anthropic"} {e.model?"· "+e.model:""}</span>
+            {e.estCost!==undefined&&<span style={{color:C.gold}}>≈ {e.estCost.toFixed(5)} USD</span>}
+          </div>
+        </Crd>)}
+      </div>
     </div>}
 
     {tab==="logclient"&&<div>
-      <Fld label="Filtrar por cliente">
-        <Sel value={logFilter} onChange={setLogFilter} opts={[{value:"all",label:"Todos"},...clientNames.map(n=>({value:n,label:n+" ("+getLogForClient(n).length+")"}))]}/></Fld>
-      <div style={{marginTop:12}}>
-        {filteredLog.length===0?<p style={{color:C.txD,fontSize:13}}>Sin consultas.</p>
-        :filteredLog.slice().reverse().map((e,i)=>{
-          const d=new Date(e.date);
-          return <div key={i} style={{padding:"10px 14px",background:C.sf,border:"1px solid "+C.bd,borderRadius:8,marginBottom:6,borderLeft:"3px solid "+C.cyan}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-              <span style={{fontSize:12,fontWeight:700,color:C.cyan}}>{e.tool}</span>
-              <span style={{fontSize:10,color:C.txD}}>{d.toLocaleDateString("es-ES")} {d.toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"})}</span>
+      <div style={{marginBottom:14,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+        <Lbl>Filtrar por cliente:</Lbl>
+        <div style={{flex:1,minWidth:200,maxWidth:400}}>
+          <Sel value={logClientFilter} onChange={setLogClientFilter} opts={allLogClients} ph="Todos los clientes"/>
+        </div>
+        {filteredLog.length>0&&<Btn small primary color={C.cyan} onClick={()=>exportLogPDF(filteredLog,logClientFilter||null)}>Exportar PDF</Btn>}
+      </div>
+      <p style={{fontSize:12,color:C.tx,marginBottom:14}}>{filteredLog.length} entradas {logClientFilter?"de "+logClientFilter:"en total"}</p>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {filteredLog.length===0?<Crd sx={{textAlign:"center"}}><p style={{color:C.txD,margin:0,fontSize:13}}>Sin actividad para este cliente.</p></Crd>
+        :filteredLog.slice().reverse().slice(0,100).map(e=><Crd key={e.id}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6,flexWrap:"wrap",gap:6}}>
+            <Badge text={e.tool} color={C.purple}/>
+            <span style={{fontSize:11,color:C.txD}}>{new Date(e.date).toLocaleString("es-ES")}</span>
+          </div>
+          {e.preview&&<p style={{fontSize:12,color:C.tx,margin:0,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{e.preview}{e.fullOutput&&e.fullOutput.length>300?"...":""}</p>}
+        </Crd>)}
+      </div>
+    </div>}
+
+    {tab==="library"&&<div>
+      <p style={{fontSize:13,color:C.tx,marginBottom:14}}>Biblioteca de contenido generado (todas las salidas guardadas)</p>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {ACTIVITY_LOG.length===0?<Crd sx={{textAlign:"center"}}><p style={{color:C.txD,margin:0,fontSize:13}}>Biblioteca vacía.</p></Crd>
+        :ACTIVITY_LOG.slice().reverse().slice(0,50).map(e=><Crd key={e.id}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:6}}>
+            <div><Badge text={e.tool} color={C.gold}/> <span style={{fontSize:12,color:C.tx,marginLeft:6}}>{e.client}</span></div>
+            <div style={{display:"flex",gap:6}}>
+              <Btn small onClick={()=>navigator.clipboard.writeText(e.fullOutput||e.preview)}>Copiar</Btn>
+              <Btn small onClick={()=>{const w=window.open("","_blank");w.document.write("<pre style='font-family:sans-serif;padding:40px;line-height:1.7;max-width:800px;margin:auto;white-space:pre-wrap'>"+(e.fullOutput||e.preview).replace(/</g,"&lt;")+"</pre>");}}>Ver</Btn>
             </div>
-            <div style={{fontSize:12,color:C.tx}}>{e.preview?.slice(0,200)}</div>
-            <div style={{display:"flex",gap:6,marginTop:6}}>
-              <Btn small onClick={()=>{try{navigator.clipboard.writeText(e.fullOutput);}catch(err){}}}>Copiar</Btn>
-            </div>
-          </div>;
-        })}
+          </div>
+          <p style={{fontSize:12,color:C.tx,margin:0,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{(e.fullOutput||e.preview||"").slice(0,250)}...</p>
+        </Crd>)}
       </div>
     </div>}
 
     {lopdClient&&<LOPDDocument client={lopdClient} onClose={()=>setLopdClient(null)} onSave={saveLOPD}/>}
+    {briefClient&&<BriefEditor client={briefClient} onClose={()=>setBriefClient(null)} onSave={(data)=>{BRIEFS_CACHE[briefClient.nombre]=data;}}/>}
   </div>;
 }
 
-/* ══════ MULTIPLICADOR DE CONTENIDO ══════ */
+/* ══════ CONTENT MULTIPLIER ══════ */
 function ContentMultiplier(){
   const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[nm,sNm]=useState("");
-  const[ci,sCi]=useState("");const[pv,sPv]=useState("");const[br,sBr]=useState("");
-  const[src,setSrc]=useState("");const[srcType,setSrcType]=useState("Texto libre");
+  const[orig,sOrig]=useState("");const[type,sType]=useState("Artículo blog");
   const[o,sO]=useState("");const[l,sL]=useState(false);
-  const[chTab,setChTab]=useState("all");
-  const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
-  const channels=["Instagram Post","Instagram Reels","TikTok","Blog SEO","Email Marketing","WhatsApp","Google Business Post","LinkedIn"];
-
-  const parseChannels=(text)=>{
-    const sections={};let current="all";
-    text.split("\n").forEach(line=>{
-      const found=channels.find(ch=>line.toUpperCase().includes(ch.toUpperCase()));
-      if(found&&(line.startsWith("=")||line.startsWith("-")||line.startsWith("#")||line.includes("---")||line.match(/^\d+[\.\)]/)||line.toUpperCase().startsWith(found.toUpperCase()))){
-        current=found;sections[current]=(sections[current]||"")+"\n";
-      }
-      sections[current]=(sections[current]||"")+line+"\n";
-    });
-    return sections;
-  };
-
-  const filtered=o?chTab==="all"?o:(() => {const s=parseChannels(o);return s[chTab]||"No se encontro contenido para este canal. Genera de nuevo.";})():"";
-
-  return <div>
-    <div style={{marginBottom:20}}>
-      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Multiplicador de Contenido IA</h3>
-      <p style={{fontSize:13,color:C.tx,margin:0}}>1 texto origen = 8 versiones optimizadas para cada canal</p>
-    </div>
-    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
-      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
-          <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
-          <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
-          <Fld label="Tipo de contenido origen"><Sel value={srcType} onChange={setSrcType} opts={["Texto libre","Artículo blog","Descripción servicio","Noticia/novedad","Caso de éxito","Oferta/promoción","Evento","FAQ / Pregunta frecuente"]}/></Fld>
-          <Fld label="Contenido origen *"><Txa value={src} onChange={setSrc} ph="Pega aqui el texto base, describe el tema o escribe la idea principal. La IA lo adaptara a 8 canales diferentes con formato, tono y longitud optimizados para cada uno..." rows={8}/></Fld>
-          <Btn primary disabled={!src||!ni} color={C.cyan} onClick={()=>{
-            setChTab("all");
-            ai("Equipo de content marketing en 2026. Transforma UN contenido en 8 piezas DIFERENTES optimizadas por canal. No recicles texto, adapta formato/tono/estructura/gancho/CTA nativamente. Usa tendencias y formatos actuales de cada plataforma.",
-            `CONTENIDO ORIGEN (${srcType}):
+  const nR=resolveNiche(ni,cni);
+  return <Tool title="Multiplicador de Contenido" subtitle="Reutiliza una pieza en 8+ formatos diferentes" out={o} ld={l} label="Variaciones" btnTxt="Multiplicar" btnCl={C.cyan} ok={!!orig} onGen={()=>
+    ai("Especialista en repurposing de contenido digital en 2026.",
+    `MULTIPLICAR CONTENIDO. Origen: ${type}. Sector: ${nR}. Centro: ${nm||"[Centro]"}.
+CONTENIDO ORIGINAL:
 """
-${src}
+${orig}
 """
-Centro: ${nm||"[Nombre]"}. Sector: ${nR}. Geo: ${geo}.
-
-8 VERSIONES COMPLETAS LISTAS PARA PUBLICAR (separa cada canal con ========):
-
-1. INSTAGRAM POST: caption completo con gancho primera linea, 15 hashtags (5 generales+5 nicho+5 locales), slides si carrusel, mejor hora
-2. INSTAGRAM REELS (30-60s): gancho 3s, script con tiempos, texto pantalla, audio sugerido, caption
-3. TIKTOK (15-45s): gancho viral nativo TikTok, script 1a persona, overlay, trending hashtags
-4. BLOG SEO: title tag (60 chars+keyword+ciudad), meta description, H1/H2/H3, articulo 600-800 palabras, FAQ x3, CTA
-5. EMAIL: 3 subject lines, preview text, cuerpo completo, mejor dia/hora
-6. WHATSAPP: mensaje 160 palabras, variante con enlace, variante engagement, cumplimiento RGPD
-7. GOOGLE BUSINESS POST: tipo apropiado, texto optimizado, CTA Google, keywords locales
-8. LINKEDIN: tono B2B, gancho primera linea, max 5 hashtags
-CALENDARIO: orden publicacion + planificacion semanal`,sO,sL,nR,geo,
-            {tool:"Multiplicador Contenido",client:nm||"Sin asignar",inputs:{tipo:srcType,origen:src.slice(0,80)}});
-          }}>Multiplicar a 8 Canales</Btn>
-        </div>
-      </Crd></div>
-      <div style={{flex:1,minWidth:300}}>
-        {o&&<div style={{marginBottom:12}}>
-          <div style={{display:"flex",gap:4,flexWrap:"wrap",background:C.sf2,borderRadius:8,padding:4}}>
-            <button onClick={()=>setChTab("all")} style={{padding:"6px 12px",borderRadius:6,border:"none",fontSize:11,fontWeight:600,cursor:"pointer",background:chTab==="all"?C.sf:"transparent",color:chTab==="all"?C.w:C.txD,fontFamily:font}}>Todo</button>
-            {channels.map(ch=><button key={ch} onClick={()=>setChTab(ch)} style={{padding:"6px 10px",borderRadius:6,border:"none",fontSize:10,fontWeight:600,cursor:"pointer",background:chTab===ch?C.sf:"transparent",color:chTab===ch?C.cyan:C.txD,fontFamily:font,whiteSpace:"nowrap"}}>{ch.replace("Instagram ","IG ").replace("Email Marketing","Email").replace("Google Business Post","GBP")}</button>)}
-          </div>
-        </div>}
-        <Out content={filtered} loading={l} label="Contenido Multiplicado"/>
-      </div>
-    </div>
-  </div>;
+Genera 8 versiones: 1) Post Instagram (carousel), 2) Reel/TikTok (guion 30s), 3) Tweet thread (8 tweets), 4) Email newsletter, 5) Post LinkedIn, 6) Story Instagram (5 frames), 7) FAQ snippet, 8) Mini-articulo SEO.
+Cada version COMPLETA y lista para publicar.`,sO,sL,nR,"Espana",
+    {tool:"Multiplicador Contenido",client:nm||"Sin asignar",inputs:{tipo:type}})}
+    fields={<>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
+      <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre del cliente"/></Fld>
+      <Fld label="Tipo de contenido origen"><Sel value={type} onChange={sType} opts={["Artículo blog","Vídeo largo","Podcast","Email","Post extenso","Whitepaper"]}/></Fld>
+      <Fld label="Contenido a multiplicar"><Txa value={orig} onChange={sOrig} ph="Pega el contenido original aquí..." rows={8}/></Fld>
+    </>}/>;
 }
 
-/* ══════ GENERADOR DE PROPUESTAS COMERCIALES ══════ */
+/* ══════ PROPOSAL GENERATOR ══════ */
 function ProposalGenerator(){
-  const[ni,sNi]=useState("");const[cni,sCni]=useState("");
-  const[nm,sNm]=useState("");const[ci,sCi]=useState("");const[pv,sPv]=useState("");const[br,sBr]=useState("");
-  const[web,sWeb]=useState("");const[contacto,sContacto]=useState("");
-  const[plan,setPlan]=useState("Profesional");const[obj,sObj]=useState("");
-  const[comp,sComp]=useState("");const[notas,sNotas]=useState("");
+  const[nm,sNm]=useState("");const[ni,sNi]=useState("");const[cni,sCni]=useState("");
+  const[ci,sCi]=useState("");const[contact,sContact]=useState("");
+  const[plan,setPlan]=useState("Profesional");const[meses,sMeses]=useState("6");
+  const[problemas,sProblemas]=useState("");const[objetivos,sObjetivos]=useState("");
   const[o,sO]=useState("");const[l,sL]=useState(false);
-  const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
+  const nR=resolveNiche(ni,cni);
+  const selectedPlan=PLANS.find(p=>p.lb===plan)||PLANS[1];
+  return <Tool title="Propuestas Comerciales" subtitle="Documentos profesionales listos para enviar al cliente" out={o} ld={l} label="Propuesta" btnTxt="Generar Propuesta" btnCl={C.gold} ok={nm&&ni} onGen={()=>
+    ai("Consultor comercial senior especializado en venta de servicios de marketing digital.",
+    `PROPUESTA COMERCIAL para: ${nm}. Sector: ${nR}. Ciudad: ${ci||"[Ciudad]"}. Contacto: ${contact||"[Contacto]"}.
+PLAN: ${plan} (${selectedPlan.price} EUR/mes). DURACION: ${meses} meses.
+PROBLEMAS DETECTADOS: ${problemas||"[Diagnostico previo]"}.
+OBJETIVOS DEL CLIENTE: ${objetivos||"[Objetivos]"}.
 
-  const printProposal=(content,clientName)=>{
-    const today=new Date().toLocaleDateString("es-ES",{day:"2-digit",month:"long",year:"numeric"});
-    let html=`<html><head><title>Propuesta - ${clientName}</title><style>
-      @page{margin:30mm 25mm}
-      body{font-family:'Segoe UI',Helvetica,sans-serif;color:#1a1a2e;line-height:1.7;font-size:13px;max-width:850px;margin:auto;padding:40px 50px}
-      .cover{text-align:center;padding:80px 0 60px;border-bottom:3px solid #2DD4BF;margin-bottom:40px;page-break-after:always}
-      .cover h1{font-size:28px;color:#2DD4BF;margin:0 0 8px;letter-spacing:-0.5px}
-      .cover h2{font-size:18px;color:#1a1a2e;font-weight:400;margin:0 0 30px}
-      .cover .meta{font-size:13px;color:#666;margin-top:40px}
-      .cover .logo{font-size:32px;font-weight:800;color:#2DD4BF;margin-bottom:20px}
-      h2{font-size:16px;color:#2DD4BF;border-bottom:1px solid #e0e0e0;padding-bottom:6px;margin:30px 0 12px}
-      h3{font-size:14px;color:#1a1a2e;margin:20px 0 8px}
-      .highlight{background:#f0faf8;border-left:3px solid #2DD4BF;padding:12px 16px;margin:12px 0;border-radius:0 6px 6px 0}
-      .price-box{background:#1a1a2e;color:white;padding:20px 24px;border-radius:10px;margin:16px 0;text-align:center}
-      .price-box .amount{font-size:36px;font-weight:800;color:#2DD4BF}
-      .price-box .period{font-size:13px;color:#94A3B8}
-      .roi-box{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0}
-      .roi-item{flex:1;min-width:150px;background:#f8f8fc;border:1px solid #e8e8f0;border-radius:8px;padding:16px;text-align:center}
-      .roi-val{font-size:22px;font-weight:700;color:#2DD4BF}
-      .roi-lbl{font-size:11px;color:#888;margin-top:4px}
-      .timeline{border-left:2px solid #2DD4BF;padding-left:20px;margin:16px 0}
-      .timeline-item{margin-bottom:16px;position:relative}
-      .timeline-item::before{content:'';width:10px;height:10px;background:#2DD4BF;border-radius:50%;position:absolute;left:-25px;top:5px}
-      .footer{margin-top:40px;padding-top:16px;border-top:2px solid #e0e0e0;font-size:11px;color:#999;text-align:center}
-      table{width:100%;border-collapse:collapse;margin:12px 0}
-      th{background:#f0faf8;color:#1a1a2e;padding:8px 12px;text-align:left;font-size:12px;border-bottom:2px solid #2DD4BF}
-      td{padding:8px 12px;border-bottom:1px solid #eee;font-size:12px}
-      @media print{body{padding:0}.cover{padding:60px 0 40px}}
-    </style></head><body>`;
-    html+=`<div class="cover">
-      <div class="logo">CLINIQ DIGITAL</div>
-      <h1>Propuesta de Servicios</h1>
-      <h2>${clientName||"[Cliente]"}</h2>
-      <div class="meta">${today}<br>${geo}<br>Plan ${plan}</div>
-    </div>`;
-    html+=`<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;line-height:1.7">${content.replace(/</g,"&lt;")}</pre>`;
-    html+=`<div class="footer">Cliniq Digital | Propuesta confidencial | ${today}<br>Este documento es valido durante 30 dias desde su fecha de emision.</div>`;
-    html+=`<script>setTimeout(()=>window.print(),600)<\/script></body></html>`;
-    const w=window.open("","_blank");w.document.write(html);
-  };
+Genera propuesta completa:
+1. PORTADA con nombre cliente, fecha, validez 15 dias
+2. RESUMEN EJECUTIVO en 1 parrafo
+3. DIAGNOSTICO ACTUAL (basado en problemas)
+4. OBJETIVOS Y KPIs medibles (3-5)
+5. PLAN PROPUESTO con desglose detallado de servicios
+6. CALENDARIO mes a mes
+7. INVERSION clara: ${selectedPlan.price} EUR/mes x ${meses} meses + posibles extras
+8. ROI esperado (conservador, no exagerar)
+9. CASOS DE EXITO similares [SUSTITUIR CON REALES]
+10. PROCESO DE ALTA y siguientes pasos
+11. CLAUSULAS BASICAS (no contrato completo)
+12. CTA: "Reservar llamada para confirmar"
 
-  return <div>
-    <div style={{marginBottom:20}}>
-      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Generador de Propuestas Comerciales</h3>
-      <p style={{fontSize:13,color:C.tx,margin:0}}>Propuestas profesionales con estrategia, precios y ROI para cerrar clientes</p>
-    </div>
-    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
-      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
-          <Fld label="Nombre negocio *"><Inp value={nm} onChange={sNm} ph="Clinica Dental Sonrisa"/></Fld>
-          <Fld label="Persona de contacto"><Inp value={contacto} onChange={sContacto} ph="Dra. Maria Lopez"/></Fld>
-          <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
-          <Fld label="Web actual"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
-          <Fld label="Plan propuesto"><Sel value={plan} onChange={setPlan} opts={PLANS.map(p=>({value:p.lb,label:`${p.lb} - ${p.price} EUR/mes - ${p.desc}`}))}/></Fld>
-          <Fld label="Objetivo principal"><Sel value={obj} onChange={sObj} opts={["Captar más pacientes/clientes","Mejorar presencia digital","Lanzar nuevo servicio","Recuperar pacientes perdidos","Posicionar como referente en la zona","Competir contra franquicias","Abrir nueva ubicación"]} ph="Seleccionar..."/></Fld>
-          <Fld label="Competencia conocida"><Inp value={comp} onChange={sComp} ph="Nombres de competidores directos"/></Fld>
-          <Fld label="Notas adicionales"><Txa value={notas} onChange={sNotas} ph="Contexto del cliente, objeciones, puntos clave..." rows={3}/></Fld>
-          <Btn primary disabled={!nm||!ni||!ci} color={C.gold} onClick={()=>
-            ai("Director comercial de agencia de marketing digital en 2026. Propuestas profesionales, persuasivas, con ROI realista y conservador basado en datos actualizados. Sin promesas vacias.",
-            `PROPUESTA COMERCIAL para: "${nm}". Contacto: ${contacto||"[Responsable]"}. Sector: ${nR}. Geo: ${geo}. Web: ${web||"N/A"}. Plan: ${plan} (${PLANS.find(p=>p.lb===plan)?.price||"497"} EUR/mes). Objetivo: ${obj||"Captar clientes"}. Competencia: ${comp||"N/A"}. Notas: ${notas||"N/A"}.
-
-Secciones:
-1. RESUMEN EJECUTIVO: situacion actual, oportunidad mercado ${geo}, propuesta valor
-2. DIAGNOSTICO: presencia digital, gaps, comparativa competencia
-3. ESTRATEGIA: objetivos SMART 3/6/12 meses, canales prioritarios, diferenciacion
-4. SERVICIOS PLAN ${plan}: detalle exacto servicios mensuales, entregables, herramientas, reuniones
-5. TIMELINE: mes 1 setup, mes 2-3 activacion, mes 4-6 optimizacion, mes 7-12 consolidacion
-6. ROI: proyeccion conservadora visitas/SEO/Maps/leads/conversion/facturacion adicional vs inversion (datos sector Espana reales)
-7. INVERSION: ${PLANS.find(p=>p.lb===plan)?.price||"497"} EUR+IVA, setup, compromiso minimo, comparativa empleado y Google Ads
-8. GARANTIAS: diferenciadores, transparencia, sin permanencia, equipo especializado ${nR}
-9. SIGUIENTE PASO: CTA, onboarding, disponibilidad
-10. CONDICIONES: pago, plazos, validez 30 dias`,sO,sL,nR,geo,
-            {tool:"Propuestas Comerciales",client:nm,inputs:{plan:plan,objetivo:obj}})
-          }>Generar Propuesta</Btn>
-          {o&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:4}}>
-            <Btn small primary color={C.gold} onClick={()=>printProposal(o,nm)}>Imprimir / PDF</Btn>
-            <Btn small onClick={()=>navigator.clipboard.writeText(o)}>Copiar texto</Btn>
-          </div>}
-        </div>
-      </Crd></div>
-      <div style={{flex:1,minWidth:300}}><Out content={o} loading={l} label="Propuesta Comercial"/></div>
-    </div>
-  </div>;
+Tono profesional, directo, sin marketing inflado.`,sO,sL,nR,"Espana",
+    {tool:"Propuestas Comerciales",client:nm,inputs:{plan:plan,meses:meses}})}
+    fields={<>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
+      <Fld label="Cliente"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
+      <Fld label="Ciudad"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
+      <Fld label="Contacto"><Inp value={contact} onChange={sContact} ph="Nombre y cargo"/></Fld>
+      <Fld label="Plan propuesto"><Sel value={plan} onChange={setPlan} opts={PLANS.map(p=>p.lb)}/></Fld>
+      <Fld label="Duración (meses)"><Sel value={meses} onChange={sMeses} opts={["3","6","9","12","24"]}/></Fld>
+      <Fld label="Problemas detectados"><Txa value={problemas} onChange={sProblemas} ph="Web obsoleta, Google Business sin optimizar..." rows={3}/></Fld>
+      <Fld label="Objetivos del cliente"><Txa value={objetivos} onChange={sObjetivos} ph="Captar 30 leads/mes, abrir nueva sede..." rows={2}/></Fld>
+    </>}/>;
 }
 
-/* ══════ CAMPAÑAS MULTICANAL ══════ */
+/* ══════ MULTI CAMPAIGN ══════ */
 function MultiCampaign(){
   const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[nm,sNm]=useState("");
-  const[ci,sCi]=useState("");const[pv,sPv]=useState("");const[br,sBr]=useState("");
-  const[obj,sObj]=useState("Lanzar servicio/tratamiento nuevo");
-  const[srv,sSrv]=useState("");const[dur,sDur]=useState("4 semanas");
-  const[budget,sBudget]=useState("300-500 EUR");const[notas,sNotas]=useState("");
+  const[srv,sSrv]=useState("");const[obj,sObj]=useState("Captar leads");
+  const[ci,sCi]=useState("");const[budget,sBudget]=useState("500");const[duracion,sDuracion]=useState("4 semanas");
   const[o,sO]=useState("");const[l,sL]=useState(false);
-  const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);
+  const nR=resolveNiche(ni,cni);
+  return <Tool title="Campañas Multicanal" subtitle="Estrategia completa coordinada en todos los canales" out={o} ld={l} label="Plan campaña" btnTxt="Generar Campaña" btnCl={C.rose} ok={nm&&srv&&ni} onGen={()=>
+    ai("Estratega de campañas multicanal integradas.",
+    `CAMPANA MULTICANAL para: ${nm} (${nR}). Servicio destacado: ${srv}. Objetivo: ${obj}. Ciudad: ${ci||"[Ciudad]"}. Presupuesto total: ${budget} EUR. Duracion: ${duracion}.
 
-  return <div>
-    <div style={{marginBottom:20}}>
-      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Campañas Multicanal</h3>
-      <p style={{fontSize:13,color:C.tx,margin:0}}>1 brief = campaña coordinada completa en todos los canales</p>
-    </div>
-    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
-      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
-          <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
-          <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
-          <Fld label="Objetivo de la campaña"><Sel value={obj} onChange={sObj} opts={["Lanzar servicio/tratamiento nuevo","Promoción estacional (Navidad, verano, vuelta cole...)","Captar primeras consultas","Evento jornada de puertas abiertas","Reactivar pacientes inactivos","Black Friday / oferta limitada","Posicionar como referente","Inauguración / nueva apertura"]}/></Fld>
-          <Fld label="Servicio o tema central *"><Inp value={srv} onChange={sSrv} ph="Ej: Blanqueamiento dental, Botox, nuevo equipo laser..."/></Fld>
-          <Fld label="Duración"><Sel value={dur} onChange={sDur} opts={["1 semana (flash)","2 semanas","4 semanas","6 semanas","8 semanas"]}/></Fld>
-          <Fld label="Presupuesto ads (opcional)"><Sel value={budget} onChange={sBudget} opts={["Sin inversión en ads","100-300 EUR","300-500 EUR","500-1000 EUR","1000-2000 EUR","+2000 EUR"]}/></Fld>
-          <Fld label="Contexto adicional"><Txa value={notas} onChange={sNotas} ph="Detalles especificos: oferta concreta, fecha evento, profesional destacado..." rows={3}/></Fld>
-          <Btn primary disabled={!srv||!ni||!nm} color={C.rose} onClick={()=>
-            ai("Director de campanas multicanal en 2026 para negocios locales. Campanas COORDINADAS donde cada canal refuerza a los demas con timing preciso. Usa formatos y tendencias actuales.",
-            `CAMPAÑA MULTICANAL: "${nm}" (${nR}) en ${geo}. Objetivo: ${obj}. Servicio: "${srv}". Duracion: ${dur}. Ads: ${budget}. Notas: ${notas||"N/A"}.
-
-Secciones:
-1. BRIEF: concepto creativo (naming, claim, visual key), mensaje principal, publico primario/secundario, tono
-2. ARQUITECTURA: fases Teaser>Lanzamiento>Sostenimiento>Cierre, calendario semana a semana, canal por fase
-3. TEASER: scripts stories/reels anticipacion, email avance, WhatsApp VIP
-4. LANZAMIENTO: post IG (copy+hashtags), reel/TikTok script, GBP, email (subject+body), WhatsApp difusion, 5 stories
-5. SOSTENIMIENTO: calendario DIA A DIA con copy COMPLETO por publicacion (Lun-Vie), repetir cada semana
-6. CIERRE: countdown stories, email urgencia, WhatsApp cierre
-7. PAID MEDIA: ${budget!=="Sin inversión en ads"?`distribucion ${budget} por canal/fase, segmentacion ${geo}, 3 variantes copy anuncios, remarketing`:"100% organico"}
-8. VISUAL: key visual descripcion, paleta, prompts IA imagenes principales
-9. KPIs: objetivos numericos por canal, checklist optimizacion
-10. POST-CAMPAÑA: seguimiento leads, analisis resultados, aprendizajes`,sO,sL,nR,geo,
-            {tool:"Campañas Multicanal",client:nm,inputs:{objetivo:obj,servicio:srv,duracion:dur}})
-          }>Generar Campaña Completa</Btn>
-        </div>
-      </Crd></div>
-      <div style={{flex:1,minWidth:300}}><Out content={o} loading={l} label="Campaña Multicanal"/></div>
-    </div>
-  </div>;
+Genera plan coordinado:
+1. CONCEPTO CREATIVO unificado (titular madre, claim, imagen guia)
+2. META ADS: presupuesto, audiencia, 3 creatividades con copy completo
+3. GOOGLE ADS: keywords, anuncios responsivos, extensiones
+4. REDES ORGANICAS: 8 posts Instagram + 4 reels + 5 stories con guion completo
+5. EMAIL: 3 secuencias (nuevos, fidelizacion, recuperacion)
+6. WHATSAPP: 5 protocolos de mensajes
+7. LANDING PAGE: estructura + copy de hero, beneficios, prueba social, CTA
+8. CALENDARIO de publicaciones dia a dia
+9. KPIs medibles por canal
+10. BUDGET BREAKDOWN: cuanto a cada canal y por que
+11. PLAN DE OPTIMIZACION segun datos en semana 2`,sO,sL,nR,ci||"Espana",
+    {tool:"Campañas Multicanal",client:nm,inputs:{servicio:srv,objetivo:obj,presupuesto:budget}})}
+    fields={<>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
+      <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
+      <Fld label="Servicio destacado"><Inp value={srv} onChange={sSrv} ph="Implantes, FIV, reforma cocina..."/></Fld>
+      <Fld label="Objetivo"><Sel value={obj} onChange={sObj} opts={["Captar leads","Promocion lanzamiento","Aumentar reservas","Posicionar nuevo servicio","Re-activar antiguos"]}/></Fld>
+      <Fld label="Ciudad"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
+      <Fld label="Presupuesto total (EUR)"><Inp value={budget} onChange={sBudget} ph="500"/></Fld>
+      <Fld label="Duración"><Sel value={duracion} onChange={sDuracion} opts={["2 semanas","4 semanas","8 semanas","12 semanas"]}/></Fld>
+    </>}/>;
 }
 
 /* ══════ META ADS PRO ══════ */
 function MetaAdsPro(){
-  const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[tx,sTx]=useState("");const[ctx,sCtx]=useState("");
-  const[nm,sNm]=useState("");const[ci,sCi]=useState("");const[pv,sPv]=useState("");const[br,sBr]=useState("");
-  const[web,sWeb]=useState("");const[obj,sObj]=useState("Conversiones (leads/citas)");
-  const[budget,sBudget]=useState("300-500 EUR/mes");const[dur,sDur]=useState("30 dias");
-  const[audience,sAudience]=useState("");const[comp,sComp]=useState("");
-  const[usp,sUsp]=useState("");const[offer,sOffer]=useState("");
-  const[prevAds,sPrevAds]=useState("No, primera campaña");
-  const[tab,setTab]=useState("strategy");
-  const[o,sO]=useState("");const[l,sL]=useState(false);const[phase,setPhase]=useState(null);
-  const nR=resolveNiche(ni,cni);const geo=geoStr(ci,pv,br);const srv=resolveTx(tx,ctx);
+  const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[nm,sNm]=useState("");
+  const[srv,sSrv]=useState("");const[budget,sBudget]=useState("300");const[obj,sObj]=useState("Leads");
+  const[ci,sCi]=useState("");
+  const[o,sO]=useState("");const[l,sL]=useState(false);
+  const nR=resolveNiche(ni,cni);
+  return <Tool title="Meta Ads Pro" subtitle="Campañas profesionales Facebook + Instagram" out={o} ld={l} label="Campaña Meta" btnTxt="Generar Estructura" btnCl={C.blue} ok={nm&&srv&&ni} onGen={()=>
+    ai("Especialista certificado Meta Ads para negocios locales en 2026.",
+    `CAMPANA META ADS para: ${nm} (${nR}). Servicio: ${srv}. Ciudad: ${ci||"Espana"}. Presupuesto: ${budget} EUR/mes. Objetivo: ${obj}.
 
-  const genStrategy=()=>{
-    setTab("strategy");
-    aiSearch("Media Buyer senior de Meta Ads para negocios locales en Espana en 2026. Busca benchmarks reales y actualizados del sector. Recomendaciones accionables, no teoricas.",
-    `ESTRATEGIA META ADS para: "${nm||"[Nombre]"}" (${nR}) en ${geo}. Servicio: "${srv||"General"}". Web: ${web||"N/A"}.
-Objetivo: ${obj}. Presupuesto: ${budget}. Duracion: ${dur}. Exp. previa: ${prevAds}.
-Audiencia: ${audience||"Por definir"}. Competencia: ${comp||"N/A"}. USP: ${usp||"N/A"}. Oferta: ${offer||"N/A"}.
-
-Busca: CPM/CTR/CPL benchmarks 2025-2026 para ${nR} en Espana, politicas Meta sector salud actualizadas.
-
-Genera estas secciones:
-1. DIAGNOSTICO PRE-CAMPANA: objetivo vs presupuesto realista, politicas Meta aplicables, requisitos pixel/CAPI/legales
-2. ARQUITECTURA CAMPANAS: estructura exacta para Ads Manager con campana prospeccion (intereses + lookalike) y retargeting (web + engagement), segmentacion detallada (edad, genero, radio km, 8-12 intereses), ubicaciones, presupuesto diario por conjunto
-3. DISTRIBUCION PRESUPUESTO: desglose ${budget} por campana/dia/semana, fase aprendizaje vs optimizacion
-4. FORMATO RECOMENDADO: imagen vs video vs carrusel con justificacion y datos CPM/CTR por formato para ${nR}
-5. 6 ANUNCIOS COMPLETOS: para cada uno: copy primario (3 variantes A/B), titulo, descripcion, CTA, prompt IA imagen detallado (Midjourney, ingles, con sujeto, iluminacion, composicion, --ar, --v 6), negative prompt
-6. LANDING/TRACKING: pagina destino, eventos pixel, UTMs
-7. PROYECCION RESULTADOS: tabla con impresiones, alcance, CTR, CPC, leads, CPL, conversiones, ROAS - estimaciones conservadora/media/alta con datos reales del sector
-8. CALENDARIO OPTIMIZACION: dia 1-3, semana 1, semana 2-4, mes 2+, señales alarma y escalado
-9. CUMPLIMIENTO POLITICAS META: restricciones ${nR}, claims prohibidos, audiencias limitadas`,sO,sL,nR,geo,setPhase,
-    {tool:"Meta Ads Pro",client:nm||"Sin asignar",inputs:{servicio:srv,objetivo:obj,presupuesto:budget}});
-  };
-
-  const genCreatives=()=>{
-    setTab("creatives");
-    ai("Director creativo de Meta Ads en 2026 para negocios locales. Crea creatividades que convierten con los formatos y tendencias actuales. Prompts de imagen IA detallados en ingles (Midjourney v6 / DALL-E 3). Copies que pasan revision Meta.",
-    `PACK CREATIVO META ADS para: "${nm||"[Nombre]"}" (${nR}) en ${geo}. Servicio: "${srv||"General"}".
-Objetivo: ${obj}. USP: ${usp||"N/A"}. Oferta: ${offer||"Sin oferta"}.
-
-Genera 10 creatividades COMPLETAS listas para producir. Para CADA una incluye: copy primario (3 variantes: emocional/racional/social proof, max 125 chars primera linea), titulo (40 chars), descripcion (30 chars), CTA, y prompt IA imagen detallado en ingles (sujeto, entorno ${nR}, iluminacion, composicion, emocion, --ar, --v 6 --style raw, NO texto en imagen) + negative prompt.
-
-Las 10 creatividades:
-1. HERO IMAGE feed 1:1 (1080x1080) - prospeccion
-2. STORIES vertical 9:16 (1080x1920) - prospeccion, con overlay texto sugerido
-3. CARRUSEL PROCESO 5 tarjetas (1080x1080) - paso a paso del servicio, prompt IA por tarjeta
-4. IMAGEN 4:5 vertical (1080x1350) - concepto transformacion sin before/after prohibido
-5. TESTIMONIO SOCIAL PROOF 1:1 - resena estilizada como creatividad
-6. VIDEO SCRIPT 15s vertical - guion segundo a segundo con texto pantalla y audio
-7. VIDEO SCRIPT 30s feed - estructura problema-agitacion-solucion-CTA, thumbnail prompt IA
-8. RETARGETING imagen 1:1 - urgencia suave, copy diferente a prospeccion
-9. OFERTA/PROMO stories - ${offer||"primera consulta gratuita"}, countdown
-10. AUTORIDAD/EQUIPO feed - posicionar profesional como referente
-
-Al final: RESUMEN PRODUCCION con total piezas, orden prioridad lanzamiento, plan A/B testing, rotacion creativa anti-fatiga.`,sO,sL,nR,geo,
-    {tool:"Meta Ads Pro - Creatividades",client:nm||"Sin asignar",inputs:{servicio:srv,objetivo:obj}});
-  };
-  return <div>
-    <div style={{marginBottom:20}}>
-      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Meta Ads Pro</h3>
-      <p style={{fontSize:13,color:C.tx,margin:0}}>Campañas profesionales de Facebook e Instagram Ads con creatividades, prompts y proyección</p>
-    </div>
-    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
-      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
-          <TreatmentSelector niche={ni} treatment={tx} setTreatment={sTx} customTx={ctx} setCustomTx={sCtx} label="Servicio foco de la campaña"/>
-          <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre del centro"/></Fld>
-          <GeoFields city={ci} setCity={sCi} province={pv} setProvince={sPv} barrio={br} setBarrio={sBr}/>
-          <Fld label="Web"><Inp value={web} onChange={sWeb} ph="www.ejemplo.es"/></Fld>
-          <Fld label="Objetivo de campaña"><Sel value={obj} onChange={sObj} opts={["Conversiones (leads/citas)","Trafico cualificado a web","Mensajes WhatsApp/Messenger","Reconocimiento de marca local","Reproducciones de video","Generación de formularios (Lead Ads)"]}/></Fld>
-          <Fld label="Presupuesto mensual"><Sel value={budget} onChange={sBudget} opts={["150-300 EUR/mes","300-500 EUR/mes","500-1000 EUR/mes","1000-2000 EUR/mes","2000-5000 EUR/mes","+5000 EUR/mes"]}/></Fld>
-          <Fld label="Duración"><Sel value={dur} onChange={sDur} opts={["15 dias (test)","30 dias","60 dias","90 dias","Continua"]}/></Fld>
-          <Fld label="Experiencia previa con ads"><Sel value={prevAds} onChange={sPrevAds} opts={["No, primera campaña","Si, con resultados pobres","Si, con resultados aceptables","Si, quiero escalar"]}/></Fld>
-          <Fld label="Público objetivo"><Txa value={audience} onChange={sAudience} ph="Ej: Mujeres 30-55, nivel medio-alto, interesadas en estetica, zona Alicante centro + Playa San Juan..." rows={2}/></Fld>
-          <Fld label="Diferenciador clave"><Inp value={usp} onChange={sUsp} ph="Ej: 20 años experiencia, tecnologia exclusiva, unico en la zona..."/></Fld>
-          <Fld label="Oferta / gancho"><Inp value={offer} onChange={sOffer} ph="Ej: Primera consulta gratuita, 20% dto febrero..."/></Fld>
-          <Fld label="Competencia ads"><Inp value={comp} onChange={sComp} ph="Competidores que anuncian en Meta"/></Fld>
-
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <Btn primary disabled={!ni||!nm||!ci} color={C.blue} onClick={genStrategy} sx={{flex:1}}>Estrategia + Proyección</Btn>
-            <Btn primary disabled={!ni||!nm} color={C.rose} onClick={genCreatives} sx={{flex:1}}>Pack Creativo (10 anuncios)</Btn>
-          </div>
-        </div>
-      </Crd></div>
-      <div style={{flex:1,minWidth:300}}>
-        {(o||l)&&<div style={{marginBottom:12}}>
-          <div style={{display:"flex",gap:4,background:C.sf2,borderRadius:8,padding:4}}>
-            <button onClick={()=>setTab("strategy")} style={{flex:1,padding:"8px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab==="strategy"?C.sf:"transparent",color:tab==="strategy"?C.blue:C.txD,fontFamily:font}}>Estrategia</button>
-            <button onClick={()=>setTab("creatives")} style={{flex:1,padding:"8px 14px",borderRadius:6,border:"none",fontSize:12,fontWeight:600,cursor:"pointer",background:tab==="creatives"?C.sf:"transparent",color:tab==="creatives"?C.rose:C.txD,fontFamily:font}}>Creatividades</button>
-          </div>
-        </div>}
-        <OutSearch content={o} loading={l} label={tab==="strategy"?"Estrategia Meta Ads":"Pack Creativo Meta Ads"} phase={phase}/>
-      </div>
-    </div>
-  </div>;
+Genera estructura completa:
+1. CAMPANA 1 - Audiencia Fria (Conversiones)
+   - Audiencia: intereses + comportamientos + lookalike
+   - 3 conjuntos de anuncios (A/B/C)
+   - 5 creatividades por conjunto: copy primario, headlines, descripciones
+2. CAMPANA 2 - Audiencia Templada (Trafico web)
+   - Custom audience: visitantes web 30 dias
+   - 3 creatividades
+3. CAMPANA 3 - Audiencia Caliente (Retargeting)
+   - Custom audience: visitas pagina servicio + engagement IG/FB
+   - Mensaje cierre, oferta limitada
+4. BUDGET breakdown por campana y conjunto
+5. ESTRUCTURA DE PUJA recomendada
+6. PIXEL events que deben estar configurados
+7. CHECKLIST pre-lanzamiento (8 puntos verificables)
+8. PLAN DE OPTIMIZACION: que mirar dia 3, dia 7, dia 14
+9. CUMPLIMIENTO normativa publicitaria del sector
+10. KPIs y umbrales de decision (cuando pausar, cuando escalar)`,sO,sL,nR,ci||"Espana",
+    {tool:"Meta Ads Pro",client:nm,inputs:{servicio:srv,presupuesto:budget}})}
+    fields={<>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
+      <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
+      <Fld label="Servicio"><Inp value={srv} onChange={sSrv} ph="Servicio a promocionar"/></Fld>
+      <Fld label="Ciudad"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
+      <Fld label="Presupuesto mensual (EUR)"><Inp value={budget} onChange={sBudget} ph="300"/></Fld>
+      <Fld label="Objetivo principal"><Sel value={obj} onChange={sObj} opts={["Leads","Conversiones","Mensajes WhatsApp","Trafico web","Reconocimiento","Reservas"]}/></Fld>
+    </>}/>;
 }
 
-/* ══════ DASHBOARD PREDICTIVO ══════ */
+/* ══════ PREDICTIVE DASHBOARD ══════ */
 function PredictiveDashboard(){
   const[ni,sNi]=useState("");const[cni,sCni]=useState("");const[nm,sNm]=useState("");
-  const[ci,sCi]=useState("");
-  /* Metricas actuales */
-  const[visitas,sVisitas]=useState("");const[leads,sLeads]=useState("");const[conv,sConv]=useState("");
-  const[ticket,sTicket]=useState("");const[resenas,sResenas]=useState("");const[nota,sNota]=useState("");
-  const[seguidores,sSeguidores]=useState("");const[engagement,sEngagement]=useState("");
-  const[kwPos,sKwPos]=useState("");const[gbpViews,sGbpViews]=useState("");
-  const[inversionAds,sInversionAds]=useState("");const[mesesActivo,sMesesActivo]=useState("3 meses");
-  const[o,sO]=useState("");const[l,sL]=useState(false);const[phase,setPhase]=useState(null);
-  const[tab,setTab]=useState("projections");
+  const[mesActual,sMesActual]=useState("");const[mesAnterior,sMesAnterior]=useState("");
+  const[invMensual,sInvMensual]=useState("");
+  const[o,sO]=useState("");const[l,sL]=useState(false);
   const nR=resolveNiche(ni,cni);
+  return <Tool title="Dashboard Predictivo" subtitle="Proyecciones a 3 y 6 meses basadas en datos actuales" out={o} ld={l} label="Dashboard" btnTxt="Generar Proyecciones" btnCl={C.green} ok={nm&&ni&&mesActual} onGen={()=>
+    ai("Analista de datos de marketing digital con conocimiento de modelos predictivos.",
+    `DASHBOARD PREDICTIVO para: ${nm} (${nR}).
+DATOS MES ACTUAL: ${mesActual}.
+DATOS MES ANTERIOR: ${mesAnterior||"No proporcionado"}.
+INVERSION MENSUAL EN MARKETING: ${invMensual||"No proporcionada"} EUR.
 
-  /* Simple metric parser */
-  const metrics=[
-    {lb:"Visitas/mes",v:visitas,cl:C.blue},
-    {lb:"Leads/mes",v:leads,cl:C.teal},
-    {lb:"Conversiones/mes",v:conv,cl:C.green},
-    {lb:"Ticket medio",v:ticket?ticket+"€":"",cl:C.gold},
-    {lb:"Reseñas",v:resenas,cl:C.purple},
-    {lb:"Nota media",v:nota,cl:nota&&parseFloat(nota)>=4.5?C.green:nota&&parseFloat(nota)>=4?C.gold:C.rose},
-    {lb:"Seguidores",v:seguidores,cl:C.cyan},
-    {lb:"GBP vistas",v:gbpViews,cl:C.orange},
-  ].filter(m=>m.v);
-
-  return <div>
-    <div style={{marginBottom:20}}>
-      <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Dashboard Predictivo</h3>
-      <p style={{fontSize:13,color:C.tx,margin:0}}>Métricas actuales + proyección IA a 3, 6 y 12 meses</p>
-    </div>
-
-    {metrics.length>0&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:20}}>
-      {metrics.map(m=><div key={m.lb} style={{background:C.sf,border:"1px solid "+C.bd,borderRadius:10,padding:"12px 16px",borderTop:"2px solid "+m.cl}}>
-        <div style={{fontSize:10,color:C.tx,marginBottom:4}}>{m.lb}</div>
-        <div style={{fontSize:20,fontWeight:700,color:m.cl}}>{m.v}</div>
-      </div>)}
-    </div>}
-
-    <div style={{display:"flex",gap:24,flexWrap:"wrap"}}>
-      <div style={{flex:"0 0 400px",maxWidth:"100%"}}><Crd>
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre,ciudad})=>{sNm(nombre);sCi(ciudad);}}/>
-          <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
-          <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Alicante"/></Fld>
-          <Fld label="Meses activo con marketing digital"><Sel value={mesesActivo} onChange={sMesesActivo} opts={["Empezando (0 meses)","1-2 meses","3 meses","6 meses","12 meses","+12 meses"]}/></Fld>
-          <div style={{fontSize:11,fontWeight:600,color:C.teal,letterSpacing:0.5,textTransform:"uppercase",marginTop:4}}>Metricas actuales</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Fld label="Visitas web/mes"><Inp value={visitas} onChange={sVisitas} ph="Ej: 1200"/></Fld>
-            <Fld label="Leads/consultas mes"><Inp value={leads} onChange={sLeads} ph="Ej: 45"/></Fld>
-            <Fld label="Conversiones/mes"><Inp value={conv} onChange={sConv} ph="Ej: 12"/></Fld>
-            <Fld label="Ticket medio (EUR)"><Inp value={ticket} onChange={sTicket} ph="Ej: 350"/></Fld>
-            <Fld label="Reseñas Google (total)"><Inp value={resenas} onChange={sResenas} ph="Ej: 87"/></Fld>
-            <Fld label="Nota media Google"><Inp value={nota} onChange={sNota} ph="Ej: 4.6"/></Fld>
-            <Fld label="Seguidores RRSS"><Inp value={seguidores} onChange={sSeguidores} ph="Ej: 2300"/></Fld>
-            <Fld label="Vistas GBP/mes"><Inp value={gbpViews} onChange={sGbpViews} ph="Ej: 5400"/></Fld>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <Fld label="Posiciones SEO clave"><Inp value={kwPos} onChange={sKwPos} ph="kw1 #pos, kw2 #pos"/></Fld>
-            <Fld label="Inversión ads/mes"><Inp value={inversionAds} onChange={sInversionAds} ph="Ej: 500"/></Fld>
-          </div>
-          <Btn primary disabled={!nm||!ni||!ci} color={C.green} onClick={()=>{
-            setTab("projections");
-            aiSearch("Analista de marketing digital en 2026. Proyecciones REALISTAS con benchmarks actualizados del sector en Espana. Rangos conservadores. Busca datos reales recientes.",
-            `DASHBOARD PREDICTIVO: "${nm}" en ${ci}. Sector: ${nR}. Meses activo: ${mesesActivo}.
-Metricas: ${[visitas&&"visitas:"+visitas,leads&&"leads:"+leads,conv&&"conv:"+conv,ticket&&"ticket:"+ticket+"EUR",resenas&&"resenas:"+resenas+"("+nota+")",seguidores&&"seguidores:"+seguidores,gbpViews&&"GBP:"+gbpViews,kwPos&&"SEO:"+kwPos,inversionAds&&"ads:"+inversionAds+"EUR"].filter(Boolean).join(", ")||"Sin metricas"}.
-
-Busca benchmarks 2025-2026 ${nR} Espana: conversion, ticket medio, crecimiento organico.
-
-Secciones:
-1. ESTADO ACTUAL: cada metrica vs benchmark, puntuacion /100, fortalezas/debilidades
-2. PROYECCION 3 MESES: tabla Metrica|Actual|Proyeccion|Variacion%, ingresos adicionales estimados
-3. PROYECCION 6 MESES: misma tabla, efecto acumulativo SEO, ROI acumulado
-4. PROYECCION 12 MESES: misma tabla, madurez canales, ROI anual
-5. ALERTAS: senales alarma, cuellos botella, plan B
-6. QUICK WINS: 5 acciones impacto <30 dias (accion, impacto estimado, esfuerzo)
-7. RECOMENDACIONES: donde invertir, canales prioritarios, estacionalidad ${nR}
-8. SCORECARD: KPIs mensuales, valores objetivo, semaforo verde/amarillo/rojo`,sO,sL,nR,ci||"Espana",setPhase,
-            {tool:"Dashboard Predictivo",client:nm,inputs:{visitas:visitas,leads:leads,conv:conv}});
-          }}>Generar Proyección con IA</Btn>
-        </div>
-      </Crd></div>
-      <div style={{flex:1,minWidth:300}}><OutSearch content={o} loading={l} label="Dashboard Predictivo" phase={phase}/></div>
-    </div>
-  </div>;
+Genera:
+1. ESTADO ACTUAL (lectura objetiva de los datos)
+2. TENDENCIA detectada (mejora/empeora/estancado y por que)
+3. PROYECCION A 3 MESES (escenario optimista, base, pesimista)
+4. PROYECCION A 6 MESES
+5. PALANCAS DE CRECIMIENTO (3-5 acciones concretas que multiplican)
+6. RIESGOS detectados y como mitigarlos
+7. ROI estimado de la inversion actual
+8. RECOMENDACIONES de reasignacion de presupuesto si aplica
+9. KPIs A MONITOREAR mensualmente
+10. SIGUIENTE REVISION recomendada y que mirar`,sO,sL,nR,"Espana",
+    {tool:"Dashboard Predictivo",client:nm})}
+    fields={<>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni} onClientSelect={({nombre})=>{sNm(nombre);}}/>
+      <Fld label="Centro"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
+      <Fld label="Datos mes actual"><Txa value={mesActual} onChange={sMesActual} ph="Visitas: 2340, Leads: 87, Reservas: 34, Coste/lead: 12€, CTR ads: 2.1%..." rows={4}/></Fld>
+      <Fld label="Datos mes anterior"><Txa value={mesAnterior} onChange={sMesAnterior} ph="Para detectar tendencia (opcional pero recomendado)" rows={3}/></Fld>
+      <Fld label="Inversión mensual marketing (EUR)"><Inp value={invMensual} onChange={sInvMensual} ph="500"/></Fld>
+    </>}/>;
 }
 
 /* ══════ TASKS ══════ */
 function Tasks(){
   const[tasks,setTasks]=useState([]);
-  const[cls,setCls]=useState([]);
-  const[show,setShow]=useState(false);
-  const[filter,setFilter]=useState("pendiente");
-  const[clientFilter,setClientFilter]=useState("all");
-  const[editId,setEditId]=useState(null);
-  const[f,setF]=useState({title:"",description:"",client:"General",priority:"media",due_date:""});
+  const[nuevaTarea,sNuevaTarea]=useState("");
+  const[clienteTarea,sClienteTarea]=useState("");
+  const[prioridad,sPrioridad]=useState("media");
+  const[filtro,sFiltro]=useState("activas");
+  const[clients,setClients]=useState([]);
 
-  useEffect(()=>{
-    db.getTasks().then(d=>d&&setTasks(d)).catch(()=>{});
-    db.getClients().then(d=>d&&d.length>0&&setCls(d.map(r=>r.nombre||""))).catch(()=>{});
-  },[]);
+  useEffect(()=>{loadTasks();db.getClients().then(d=>setClients(d||[]));},[]);
 
-  const save=()=>{
-    if(!f.title.trim()) return;
-    if(editId){
-      db.updateTask(editId,f).then(saved=>{
-        if(saved) setTasks(prev=>prev.map(t=>t.id===editId?{...saved}:t));
+  async function loadTasks(){
+    try{
+      const r=await fetch("/api/tasks");
+      if(!r.ok) return;
+      const d=await r.json();
+      setTasks(d||[]);
+    }catch(e){}
+  }
+
+  const addTask=async()=>{
+    if(!nuevaTarea.trim()) return;
+    try{
+      await fetch("/api/tasks",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          title:nuevaTarea.trim(),
+          client_name:clienteTarea||null,
+          priority:prioridad,
+          status:"pendiente",
+        })
       });
-      setEditId(null);
-    }else{
-      db.createTask(f).then(saved=>{
-        if(saved) setTasks(prev=>[saved,...prev]);
+      sNuevaTarea("");sClienteTarea("");
+      loadTasks();
+    }catch(e){alert("Error añadiendo tarea");}
+  };
+  const toggleTask=async(t)=>{
+    try{
+      await fetch("/api/tasks",{
+        method:"PUT",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({id:t.id,status:t.status==="completada"?"pendiente":"completada"})
       });
-    }
-    setF({title:"",description:"",client:"General",priority:"media",due_date:""});
-    setShow(false);
+      loadTasks();
+    }catch(e){}
   };
-
-  const toggle=(task)=>{
-    const newStatus=task.status==="completada"?"pendiente":"completada";
-    db.updateTask(task.id,{status:newStatus}).then(saved=>{
-      if(saved) setTasks(prev=>prev.map(t=>t.id===task.id?{...saved}:t));
-    });
-  };
-
-  const setProg=(task)=>{
-    db.updateTask(task.id,{status:"en_progreso"}).then(saved=>{
-      if(saved) setTasks(prev=>prev.map(t=>t.id===task.id?{...saved}:t));
-    });
-  };
-
-  const del=(id)=>{
-    if(!confirm("Eliminar tarea?")) return;
-    db.deleteTask(id);
-    setTasks(prev=>prev.filter(t=>t.id!==id));
-  };
-
-  const startEdit=(t)=>{
-    setF({title:t.title,description:t.description||"",client:t.client_name||"General",priority:t.priority||"media",due_date:t.due_date?t.due_date.split("T")[0]:""});
-    setEditId(t.id);setShow(true);
+  const deleteTask=async(id)=>{
+    if(!confirm("Eliminar esta tarea?")) return;
+    try{
+      await fetch("/api/tasks?id="+id,{method:"DELETE"});
+      loadTasks();
+    }catch(e){}
   };
 
   const filtered=tasks.filter(t=>{
-    if(filter!=="all"&&t.status!==filter) return false;
-    if(clientFilter!=="all"&&t.client_name!==clientFilter) return false;
+    if(filtro==="activas") return t.status!=="completada";
+    if(filtro==="completadas") return t.status==="completada";
     return true;
   });
 
-  const priColors={alta:C.rose,media:C.gold,baja:C.green};
-  const statusColors={pendiente:C.orange,en_progreso:C.blue,completada:C.green};
-  const statusLabels={pendiente:"Pendiente",en_progreso:"En progreso",completada:"Completada"};
-
-  const pendCount=tasks.filter(t=>t.status==="pendiente").length;
-  const progCount=tasks.filter(t=>t.status==="en_progreso").length;
-  const doneCount=tasks.filter(t=>t.status==="completada").length;
-  const overdueCount=tasks.filter(t=>t.status!=="completada"&&t.due_date&&new Date(t.due_date)<new Date()).length;
+  const pColors={alta:C.red,media:C.gold,baja:C.green};
 
   return <div>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-      <div>
-        <h2 style={{fontSize:20,fontWeight:700,color:C.w,margin:0}}>Tareas / Pendientes</h2>
-        <p style={{fontSize:12,color:C.txD,margin:"4px 0 0"}}>
-          {pendCount} pendientes, {progCount} en progreso, {doneCount} completadas
-          {overdueCount>0&&<span style={{color:C.rose}}> - {overdueCount} vencidas</span>}
-        </p>
-      </div>
-      <Btn onClick={()=>{setF({title:"",description:"",client:"General",priority:"media",due_date:""});setEditId(null);setShow(true);}}>+ Nueva tarea</Btn>
-    </div>
+    <h2 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 16px"}}>Tareas / Pendientes</h2>
 
-    <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
-      {[["all","Todas"],["pendiente","Pendientes"],["en_progreso","En progreso"],["completada","Completadas"]].map(([v,l])=>
-        <span key={v} onClick={()=>setFilter(v)} style={{padding:"5px 14px",borderRadius:8,fontSize:12,cursor:"pointer",
-          background:filter===v?C.teal:"transparent",color:filter===v?C.bg:C.tx,border:"1px solid "+(filter===v?C.teal:C.bd)}}>{l}</span>
+    <Crd sx={{marginBottom:16}}>
+      <h4 style={{fontSize:13,fontWeight:700,color:C.teal,margin:"0 0 12px"}}>Nueva tarea</h4>
+      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:10,alignItems:"end",flexWrap:"wrap"}}>
+        <Fld label="Tarea"><Inp value={nuevaTarea} onChange={sNuevaTarea} ph="Qué hay que hacer..."/></Fld>
+        <Fld label="Cliente"><Sel value={clienteTarea} onChange={sClienteTarea} opts={clients.map(c=>c.nombre)} ph="Sin cliente"/></Fld>
+        <Fld label="Prioridad"><Sel value={prioridad} onChange={sPrioridad} opts={["alta","media","baja"]}/></Fld>
+        <div><Btn primary color={C.green} onClick={addTask}>+ Añadir</Btn></div>
+      </div>
+    </Crd>
+
+    <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+      {[{id:"activas",lb:"Activas ("+tasks.filter(t=>t.status!=="completada").length+")"},{id:"completadas",lb:"Completadas"},{id:"todas",lb:"Todas"}].map(f=>
+        <Btn key={f.id} small primary={filtro===f.id} color={filtro===f.id?C.teal:C.tx} onClick={()=>sFiltro(f.id)}>{f.lb}</Btn>
       )}
-      <Sel value={clientFilter} onChange={setClientFilter}
-        opts={[{v:"all",l:"Todos los clientes"},...cls.map(n=>({v:n,l:n})),{v:"General",l:"General"}]}
-        style={{marginLeft:"auto",maxWidth:200}}/>
     </div>
 
-    {show&&<Crd style={{marginBottom:16}}>
-      <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 12px"}}>{editId?"Editar tarea":"Nueva tarea"}</h3>
-      <Fld label="Titulo"><Inp value={f.title} onChange={v=>setF({...f,title:v})} ph="Que hay que hacer?"/></Fld>
-      <Fld label="Descripcion (opcional)"><Txa value={f.description} onChange={v=>setF({...f,description:v})} rows={2} ph="Detalles extra..."/></Fld>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-        <Fld label="Cliente"><Sel value={f.client} onChange={v=>setF({...f,client:v})} opts={[{v:"General",l:"General"},...cls.map(n=>({v:n,l:n}))]}/></Fld>
-        <Fld label="Prioridad"><Sel value={f.priority} onChange={v=>setF({...f,priority:v})} opts={[{v:"alta",l:"Alta"},{v:"media",l:"Media"},{v:"baja",l:"Baja"}]}/></Fld>
-        <Fld label="Fecha limite"><Inp type="date" value={f.due_date} onChange={v=>setF({...f,due_date:v})}/></Fld>
-      </div>
-      <div style={{display:"flex",gap:8,marginTop:10}}>
-        <Btn onClick={save}>{editId?"Guardar cambios":"Crear tarea"}</Btn>
-        <Btn onClick={()=>{setShow(false);setEditId(null);}} style={{background:C.sf2}}>Cancelar</Btn>
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {filtered.length===0?<Crd sx={{textAlign:"center"}}><p style={{color:C.txD,margin:0,fontSize:13}}>Sin tareas en esta vista.</p></Crd>
+      :filtered.map(t=><Crd key={t.id} sx={{display:"flex",alignItems:"center",gap:12,opacity:t.status==="completada"?0.55:1}}>
+        <div onClick={()=>toggleTask(t)} style={{width:24,height:24,borderRadius:6,border:"2px solid "+(t.status==="completada"?C.green:C.txD),background:t.status==="completada"?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,cursor:"pointer",color:C.bg,fontSize:14,fontWeight:700}}>{t.status==="completada"?"✓":""}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <p style={{fontSize:13,color:C.w,margin:0,fontWeight:600,textDecoration:t.status==="completada"?"line-through":"none"}}>{t.title}</p>
+          <div style={{display:"flex",gap:10,marginTop:4,flexWrap:"wrap"}}>
+            <span style={{fontSize:11,color:pColors[t.priority]||C.tx,fontWeight:600,padding:"1px 8px",borderRadius:4,background:bg8(pColors[t.priority]||C.tx)}}>{t.priority}</span>
+            {t.client_name&&<span style={{fontSize:11,color:C.tx}}>{t.client_name}</span>}
+            <span style={{fontSize:10,color:C.txD}}>{new Date(t.created_at).toLocaleDateString("es-ES")}</span>
+          </div>
+        </div>
+        <Btn small onClick={()=>deleteTask(t.id)}>×</Btn>
+      </Crd>)}
+    </div>
+  </div>;
+}
+
+/* ══════ HOME / PANEL ══════ */
+function Home({setAct}){
+  const totalActivity=ACTIVITY_LOG.length;
+  const last24h=ACTIVITY_LOG.filter(e=>new Date(e.date)>new Date(Date.now()-24*60*60*1000)).length;
+  const totalCost=ACTIVITY_LOG.reduce((s,e)=>s+(e.estCost||0),0);
+  const last30days=ACTIVITY_LOG.filter(e=>new Date(e.date)>new Date(Date.now()-30*24*60*60*1000));
+  const cost30=last30days.reduce((s,e)=>s+(e.estCost||0),0);
+  const toolStats={};ACTIVITY_LOG.forEach(e=>{toolStats[e.tool]=(toolStats[e.tool]||0)+1;});
+  const topTools=Object.entries(toolStats).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  const groups={};MENU.forEach((m,i)=>{
+    if(m.g){const gname=m.g;groups[gname]=[];let j=i+1;while(j<MENU.length&&!MENU[j].g){groups[gname].push(MENU[j]);j++;}}
+  });
+
+  return <div>
+    <h2 style={{fontSize:20,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Panel de Control</h2>
+    <p style={{fontSize:13,color:C.tx,margin:"0 0 24px"}}>Cliniq Digital · Plataforma de marketing para negocios locales</p>
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginBottom:24}}>
+      <Crd sx={{textAlign:"center"}}>
+        <p style={{fontSize:11,color:C.tx,margin:"0 0 4px",letterSpacing:0.5,textTransform:"uppercase"}}>Total consultas</p>
+        <p style={{fontSize:24,fontWeight:700,color:C.teal,margin:0}}>{totalActivity}</p>
+      </Crd>
+      <Crd sx={{textAlign:"center"}}>
+        <p style={{fontSize:11,color:C.tx,margin:"0 0 4px",letterSpacing:0.5,textTransform:"uppercase"}}>Últimas 24h</p>
+        <p style={{fontSize:24,fontWeight:700,color:C.green,margin:0}}>{last24h}</p>
+      </Crd>
+      <Crd sx={{textAlign:"center"}}>
+        <p style={{fontSize:11,color:C.tx,margin:"0 0 4px",letterSpacing:0.5,textTransform:"uppercase"}}>Coste estimado total</p>
+        <p style={{fontSize:24,fontWeight:700,color:C.gold,margin:0}}>{totalCost.toFixed(3)} <span style={{fontSize:13}}>USD</span></p>
+      </Crd>
+      <Crd sx={{textAlign:"center"}}>
+        <p style={{fontSize:11,color:C.tx,margin:"0 0 4px",letterSpacing:0.5,textTransform:"uppercase"}}>Coste últimos 30d</p>
+        <p style={{fontSize:24,fontWeight:700,color:C.blue,margin:0}}>{cost30.toFixed(3)} <span style={{fontSize:13}}>USD</span></p>
+      </Crd>
+    </div>
+
+    {topTools.length>0&&<Crd sx={{marginBottom:24}}>
+      <h4 style={{fontSize:13,fontWeight:700,color:C.w,margin:"0 0 12px"}}>Herramientas más utilizadas</h4>
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {topTools.map(([t,n])=><div key={t} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:13,color:C.tx}}>{t}</span>
+          <span style={{fontSize:13,fontWeight:700,color:C.teal}}>{n}</span>
+        </div>)}
       </div>
     </Crd>}
 
-    {filtered.length===0&&<Crd><p style={{fontSize:13,color:C.txD,textAlign:"center",padding:20}}>
-      {filter==="all"?"No hay tareas. Crea la primera con el boton de arriba.":"Sin tareas con este filtro."}
-    </p></Crd>}
-
-    {filtered.map(t=>{
-      const isOverdue=t.status!=="completada"&&t.due_date&&new Date(t.due_date)<new Date();
-      const dueStr=t.due_date?new Date(t.due_date).toLocaleDateString("es-ES",{day:"numeric",month:"short"}):"";
-      return <div key={t.id} style={{background:C.sf,border:"1px solid "+(isOverdue?C.rose:C.bd),borderRadius:10,padding:"12px 16px",marginBottom:8,
-        borderLeft:"4px solid "+(statusColors[t.status]||C.bd),opacity:t.status==="completada"?0.6:1}}>
-        <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
-          <div onClick={()=>toggle(t)} style={{width:22,height:22,borderRadius:6,border:"2px solid "+(t.status==="completada"?C.green:C.bd),
-            background:t.status==="completada"?C.green:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",
-            flexShrink:0,marginTop:2}}>
-            {t.status==="completada"&&<span style={{color:C.bg,fontSize:14,fontWeight:700}}>✓</span>}
-          </div>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-              <span style={{fontSize:14,fontWeight:600,color:t.status==="completada"?C.txD:C.w,
-                textDecoration:t.status==="completada"?"line-through":"none"}}>{t.title}</span>
-              <span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:priColors[t.priority]||C.gold,color:C.bg,fontWeight:600}}>{t.priority}</span>
-              {t.client_name&&t.client_name!=="General"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:C.teal+"30",color:C.teal}}>{t.client_name}</span>}
-              {dueStr&&<span style={{fontSize:10,color:isOverdue?C.rose:C.txD}}>{isOverdue?"Vencida: ":""}{dueStr}</span>}
-            </div>
-            {t.description&&<p style={{fontSize:12,color:C.txD,margin:"4px 0 0",lineHeight:1.4}}>{t.description}</p>}
-          </div>
-          <div style={{display:"flex",gap:4,flexShrink:0}}>
-            {t.status==="pendiente"&&<span onClick={()=>setProg(t)} title="Marcar en progreso" style={{cursor:"pointer",fontSize:12,padding:"4px 8px",borderRadius:6,background:C.blue+"20",color:C.blue}}>▶</span>}
-            <span onClick={()=>startEdit(t)} style={{cursor:"pointer",fontSize:12,padding:"4px 8px",borderRadius:6,background:C.sf2,color:C.tx}}>✎</span>
-            <span onClick={()=>del(t.id)} style={{cursor:"pointer",fontSize:12,padding:"4px 8px",borderRadius:6,background:C.rose+"20",color:C.rose}}>✕</span>
-          </div>
-        </div>
-      </div>;
-    })}
-  </div>;
-}
-
-/* ══════ HOME ══════ */
-function Home({go}){
-  const[cls,setCls]=useState([]);
-  const[pendingTasks,setPendingTasks]=useState(0);
-  const[overdueTasks,setOverdueTasks]=useState(0);
-  const[,tick]=useState(0);
-  useEffect(()=>{
-    db.getClients().then(data=>{
-      if(data&&data.length>0) setCls(data.map(r=>({
-        nombre:r.nombre||"",plan:r.plan||"Esencial",nicho:r.nicho||"",
-        cuotaMensual:r.cuota_mensual||r.cuotaMensual||"",fechaAlta:r.fecha_alta||""
-      })));
-    }).catch(()=>{});
-    db.getTasks&&db.getTasks().then(d=>{
-      if(d){
-        setPendingTasks(d.filter(t=>t.status!=="completada").length);
-        setOverdueTasks(d.filter(t=>t.status!=="completada"&&t.due_date&&new Date(t.due_date)<new Date()).length);
-      }
-    }).catch(()=>{});
-    const t=setInterval(()=>tick(n=>n+1),5000);
-    return ()=>clearInterval(t);
-  },[]);
-
-  const log=ACTIVITY_LOG;
-  const now=new Date();
-  const thisMonth=log.filter(e=>{const d=new Date(e.date);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
-  const today=log.filter(e=>new Date(e.date).toDateString()===now.toDateString());
-  const toolsUsed=[...new Set(thisMonth.map(e=>e.tool))];
-  const mrr=cls.reduce((s,c)=>s+(parseFloat(c.cuotaMensual)||0),0);
-  const planDist={Esencial:0,Profesional:0,Premium:0};
-  cls.forEach(c=>{if(planDist[c.plan]!==undefined)planDist[c.plan]++;});
-  const nicheDist={};
-  cls.forEach(c=>{const n=c.nicho||"Sin sector";nicheDist[n]=(nicheDist[n]||0)+1;});
-  const topNiches=Object.entries(nicheDist).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const last5=log.slice(-5).reverse();
-
-  const Kpi=({label,value,sub,color})=><div style={{background:C.sf,border:"1px solid "+C.bd,borderRadius:12,padding:"16px 20px",borderTop:"3px solid "+color}}>
-    <div style={{fontSize:11,color:C.tx,marginBottom:4}}>{label}</div>
-    <div style={{fontSize:26,fontWeight:700,color:color}}>{value}</div>
-    {sub&&<div style={{fontSize:11,color:C.txD,marginTop:2}}>{sub}</div>}
-  </div>;
-
-  const Bar=({label,value,max,color})=>{
-    const pct=max>0?Math.round(value/max*100):0;
-    return <div style={{marginBottom:8}}>
-      <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
-        <span style={{color:C.tx}}>{label}</span><span style={{color:color,fontWeight:600}}>{value}</span>
-      </div>
-      <div style={{height:6,background:C.sf2,borderRadius:3,overflow:"hidden"}}>
-        <div style={{height:"100%",width:pct+"%",background:color,borderRadius:3,transition:"width 0.5s"}}/>
-      </div>
-    </div>;
-  };
-
-  return <div>
-    <div style={{marginBottom:24}}>
-      <h2 style={{fontSize:22,fontWeight:700,color:C.w,margin:"0 0 4px"}}>Dashboard</h2>
-      <p style={{fontSize:13,color:C.tx,margin:0}}>Cliniq Digital - {now.toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
-    </div>
-
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:14,marginBottom:24}}>
-      <Kpi label="Clientes activos" value={cls.length} sub={cls.length>0?`${planDist.Premium} premium`:""} color={C.teal}/>
-      <Kpi label="MRR (mensual)" value={mrr>0?mrr.toLocaleString("es-ES")+" EUR":"0 EUR"} sub={cls.length>0?Math.round(mrr/cls.length)+" EUR/cliente medio":""} color={C.green}/>
-      <Kpi label="Consultas mes" value={thisMonth.length} sub={today.length+" hoy"} color={C.blue}/>
-      <Kpi label="Herramientas usadas" value={toolsUsed.length} sub="de 28 disponibles" color={C.purple}/>
-      <Kpi label="Total consultas" value={log.length} sub={cls.length>0?Math.round(log.length/cls.length)+" por cliente":""} color={C.cyan}/>
-      <Kpi label="Tareas pendientes" value={pendingTasks} sub={overdueTasks>0?overdueTasks+" vencidas":"todo al dia"} color={overdueTasks>0?C.rose:C.orange}/>
-    </div>
-
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:24}}>
-
-      <Crd>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-          <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:0}}>Actividad reciente</h3>
-          <span onClick={()=>go("clients")} style={{fontSize:11,color:C.teal,cursor:"pointer"}}>Ver todo</span>
-        </div>
-        {last5.length===0?<p style={{fontSize:13,color:C.txD}}>Sin actividad. Usa cualquier herramienta para empezar.</p>
-        :last5.map((e,i)=>{
-          const d=new Date(e.date);
-          const mins=Math.round((now-d)/60000);
-          const timeAgo=mins<60?mins+"min":mins<1440?Math.round(mins/60)+"h":Math.round(mins/1440)+"d";
-          return <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<last5.length-1?"1px solid "+C.bd:"none"}}>
-            <span style={{fontSize:10,fontWeight:700,color:C.bg,background:C.cyan,padding:"2px 6px",borderRadius:4,whiteSpace:"nowrap",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{e.tool}</span>
-            <span style={{fontSize:12,color:C.tx,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.client}</span>
-            <span style={{fontSize:10,color:C.txD,whiteSpace:"nowrap"}}>{timeAgo}</span>
-          </div>;
-        })}
-      </Crd>
-
-      <Crd>
-        <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Clientes por plan</h3>
-        {cls.length===0?<p style={{fontSize:13,color:C.txD}}>Sin clientes registrados.</p>:<div>
-          <Bar label="Esencial (297 EUR)" value={planDist.Esencial} max={cls.length} color={C.teal}/>
-          <Bar label="Profesional (497 EUR)" value={planDist.Profesional} max={cls.length} color={C.blue}/>
-          <Bar label="Premium (897 EUR)" value={planDist.Premium} max={cls.length} color={C.gold}/>
-          <div style={{marginTop:14,padding:"10px 12px",background:C.sf2,borderRadius:8}}>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
-              <span style={{color:C.tx}}>Facturacion anual estimada</span>
-              <span style={{color:C.green,fontWeight:700}}>{(mrr*12).toLocaleString("es-ES")} EUR</span>
+    <h3 style={{fontSize:15,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Acceso rápido a herramientas</h3>
+    {Object.entries(groups).map(([gname,items])=><div key={gname} style={{marginBottom:20}}>
+      <p style={{fontSize:11,color:C.gold,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase",marginBottom:10}}>{gname}</p>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:10}}>
+        {items.map(it=><Crd key={it.id} sx={{cursor:"pointer",padding:14}} onClick={()=>setAct(it.id)}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:32,height:32,borderRadius:8,background:bg8(it.cl),display:"flex",alignItems:"center",justifyContent:"center",color:it.cl,fontSize:16,fontWeight:700}}>{it.ic}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <p style={{fontSize:12,fontWeight:600,color:C.w,margin:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{it.lb}</p>
             </div>
           </div>
-        </div>}
-      </Crd>
-
-      {topNiches.length>0&&<Crd>
-        <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Sectores</h3>
-        {topNiches.map(([n,c],i)=><Bar key={n} label={n} value={c} max={cls.length} color={[C.purple,C.blue,C.teal,C.rose,C.orange][i%5]}/>)}
-      </Crd>}
-
-      {toolsUsed.length>0&&<Crd>
-        <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Herramientas mas usadas (mes)</h3>
-        {(()=>{
-          const freq={};thisMonth.forEach(e=>{freq[e.tool]=(freq[e.tool]||0)+1;});
-          const sorted=Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,6);
-          const maxV=sorted[0]?.[1]||1;
-          return sorted.map(([t,c],i)=><Bar key={t} label={t} value={c} max={maxV} color={[C.cyan,C.blue,C.teal,C.purple,C.gold,C.rose][i%6]}/>);
-        })()}
-      </Crd>}
-
-      <Crd>
-        <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Costes IA (mes actual)</h3>
-        {(()=>{
-          const provCosts={};
-          thisMonth.forEach(e=>{
-            const p=e.provider||"anthropic";
-            if(!provCosts[p]) provCosts[p]={count:0,cost:0};
-            provCosts[p].count++;
-            provCosts[p].cost+=(parseFloat(e.estCost)||0);
-          });
-          const totalCost=Object.values(provCosts).reduce((s,v)=>s+v.cost,0);
-          const provColors={groq:C.green,deepseek:C.blue,anthropic:C.purple,fal:C.orange};
-          const provLabels={groq:"Groq (Llama 4)",deepseek:"DeepSeek",anthropic:"Claude",fal:"Fal.ai (imagenes)"};
-          const entries=Object.entries(provCosts).sort((a,b)=>b[1].cost-a[1].cost);
-          return <div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:14}}>
-              <span style={{fontSize:22,fontWeight:700,color:totalCost>5?C.rose:C.green}}>{totalCost.toFixed(3)} USD</span>
-              <span style={{fontSize:11,color:C.txD}}>{thisMonth.length} consultas</span>
-            </div>
-            {entries.map(([p,v])=>{
-              const maxCost=entries[0]?.[1]?.cost||1;
-              return <div key={p} style={{marginBottom:8}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
-                  <span style={{color:C.tx}}>{provLabels[p]||p} ({v.count})</span>
-                  <span style={{color:provColors[p]||C.tx,fontWeight:600}}>{v.cost.toFixed(4)} USD</span>
-                </div>
-                <div style={{height:5,background:C.sf2,borderRadius:3,overflow:"hidden"}}>
-                  <div style={{height:"100%",width:Math.max(Math.round(v.cost/maxCost*100),2)+"%",background:provColors[p]||C.tx,borderRadius:3}}/>
-                </div>
-              </div>;
-            })}
-            {totalCost>0&&mrr>0&&<div style={{marginTop:12,padding:"8px 12px",background:C.sf2,borderRadius:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
-                <span style={{color:C.tx}}>Coste IA vs MRR</span>
-                <span style={{color:C.green,fontWeight:700}}>{(totalCost*0.92).toFixed(2)} EUR ({((totalCost*0.92)/mrr*100).toFixed(1)}%)</span>
-              </div>
-            </div>}
-            {totalCost===0&&<p style={{fontSize:12,color:C.txD}}>Sin consultas este mes. Los costes se calculan automaticamente.</p>}
-          </div>;
-        })()}
-      </Crd>
-    </div>
-
-    <div style={{marginBottom:16}}>
-      <h3 style={{fontSize:14,fontWeight:700,color:C.w,margin:"0 0 14px"}}>Acceso rapido</h3>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:16}}>
-        {[
-          {t:"Produccion",ids:["landing","whatsapp","seo","followup","social","video","imageprompt","gbp","webstruct"]},
-          {t:"Crecimiento",ids:["multiplier","proposal","campaign","metaads","dashboard"]},
-          {t:"Inteligencia",ids:["audit","competitor","compliance","reviews"]},
-          {t:"Presencia Digital",ids:["scan","deepanalysis","expansion","citations","reputation","voiceseo","brandmonitor","implement"]},
-          {t:"Gestion",ids:["report","manual","clients","tasks"]}
-        ].map(g=><Crd key={g.t}>
-          <h3 style={{fontSize:13,fontWeight:700,color:C.w,margin:"0 0 10px"}}>{g.t}</h3>
-          {g.ids.map(id=>{const it=ITEMS.find(x=>x.id===id);if(!it)return null;return(
-            <div key={id} onClick={()=>go(id)} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",borderRadius:8,cursor:"pointer",transition:"background 0.15s"}}
-              onMouseEnter={e=>{e.currentTarget.style.background=C.sf2;}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
-              <span style={{fontSize:12,color:it.cl,width:18,textAlign:"center"}}>{it.ic}</span>
-              <span style={{fontSize:12,color:C.tx,flex:1}}>{it.lb}</span>
-              <span style={{fontSize:10,color:C.txD}}>{">"}</span>
-            </div>);})}
         </Crd>)}
       </div>
-    </div>
+    </div>)}
   </div>;
 }
 
-/* ══════ MAIN ══════ */
+/* ══════ APP ROOT ══════ */
 export default function App(){
   const[act,setAct]=useState("home");
   const[col,setCol]=useState(false);
-  useEffect(()=>{loadActivityFromDb();},[]);
-  const pages={
-    home:<Home go={setAct}/>,landing:<Landing/>,whatsapp:<WhatsApp/>,seo:<Seo/>,audit:<Audit/>,
-    followup:<Followup/>,webstruct:<WebStruct/>,social:<Social/>,gbp:<Gbp/>,video:<Video/>,
+
+  useEffect(()=>{
+    loadActivityFromDb();
+    loadBriefsFromDb();
+  },[]);
+
+  useEffect(()=>{
+    const css=`
+      *{box-sizing:border-box}
+      body{margin:0;background:${C.bg};color:${C.w};font-family:${font}}
+      ::-webkit-scrollbar{width:8px;height:8px}
+      ::-webkit-scrollbar-track{background:${C.sf2}}
+      ::-webkit-scrollbar-thumb{background:${C.bd};border-radius:4px}
+      ::-webkit-scrollbar-thumb:hover{background:${C.txD}}
+      .spinner{width:16px;height:16px;border:2px solid ${C.bd};border-top-color:${C.teal};border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block}
+      @keyframes spin{to{transform:rotate(360deg)}}
+      @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+      input,textarea,select{font-family:${font}!important}
+      input:focus,textarea:focus,select:focus{border-color:${C.teal}!important}
+      button:hover{filter:brightness(1.1)}
+    `;
+    const st=document.createElement("style");st.innerHTML=css;document.head.appendChild(st);
+    return()=>st.remove();
+  },[]);
+
+  const tools={
+    home:<Home setAct={setAct}/>,
+    landing:<Landing/>,
+    whatsapp:<WhatsApp/>,
+    seo:<Seo/>,
+    audit:<Audit/>,
+    followup:<Followup/>,
+    webstruct:<WebStruct/>,
+    social:<Social/>,
+    gbp:<Gbp/>,
+    video:<Video/>,
     imageprompt:<ImagePrompt/>,
-    competitor:<Competitor/>,compliance:<Compliance/>,reviews:<Reviews/>,report:<Report/>,manual:<Manual/>,
-    clients:<Clients/>,tasks:<Tasks/>,scan:<ScanPresencia/>,expansion:<Expansion/>,citations:<CitationsAudit/>,
-    reputation:<Reputation/>,voiceseo:<VoiceSeo/>,brandmonitor:<BrandMonitor/>,
-    deepanalysis:<DeepAnalysis/>,implement:<ImplementHub/>,
-    multiplier:<ContentMultiplier/>,proposal:<ProposalGenerator/>,campaign:<MultiCampaign/>,metaads:<MetaAdsPro/>,dashboard:<PredictiveDashboard/>
+    competitor:<Competitor/>,
+    compliance:<Compliance/>,
+    reviews:<Reviews/>,
+    scan:<ScanPresencia/>,
+    deepanalysis:<DeepAnalysis/>,
+    expansion:<Expansion/>,
+    citations:<CitationsAudit/>,
+    reputation:<Reputation/>,
+    voiceseo:<VoiceSeo/>,
+    brandmonitor:<BrandMonitor/>,
+    implement:<ImplementHub/>,
+    multiplier:<ContentMultiplier/>,
+    proposal:<ProposalGenerator/>,
+    campaign:<MultiCampaign/>,
+    metaads:<MetaAdsPro/>,
+    dashboard:<PredictiveDashboard/>,
+    report:<Report/>,
+    manual:<Manual/>,
+    clients:<Clients/>,
+    tasks:<Tasks/>,
   };
-  const curLabel=ITEMS.find(i=>i.id===act)?.lb||"Panel";
 
-  return <div style={{fontFamily:font,background:C.bg,minHeight:"100vh",display:"flex",color:C.w}}>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
-    <style>{`*{margin:0;padding:0;box-sizing:border-box}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:${C.bg}}::-webkit-scrollbar-thumb{background:${C.bd};border-radius:3px}@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}.spinner{width:16px;height:16px;border:2px solid ${C.teal};border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite}select option{background:${C.sf};color:${C.w}}@media(max-width:860px){.dsk{display:none!important}}`}</style>
-
-    <aside className="dsk" style={{width:col?54:220,background:C.sf,borderRight:"1px solid "+C.bd,display:"flex",flexDirection:"column",transition:"width 0.25s",flexShrink:0,height:"100vh",position:"sticky",top:0,overflow:"hidden"}}>
-      <div style={{padding:col?"14px 6px":"14px 12px",borderBottom:"1px solid "+C.bd,display:"flex",alignItems:"center",gap:8,justifyContent:col?"center":"flex-start"}}>
-        <div style={{width:26,height:26,borderRadius:6,background:"linear-gradient(135deg,"+C.teal+","+C.tealD+")",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:C.bg,flexShrink:0}}>C</div>
-        {!col&&<span style={{fontSize:13,fontWeight:700,whiteSpace:"nowrap"}}>CLINIQ <span style={{color:C.teal}}>DIGITAL</span></span>}
+  return <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.w}}>
+    <aside style={{
+      width:col?60:230,background:C.sf,borderRight:"1px solid "+C.bd,
+      transition:"width 0.2s",overflowY:"auto",overflowX:"hidden",
+      flexShrink:0,position:"sticky",top:0,height:"100vh"
+    }}>
+      <div style={{padding:"18px 14px",borderBottom:"1px solid "+C.bd,display:"flex",alignItems:"center",gap:10}}>
+        <div style={{width:28,height:28,borderRadius:7,background:"linear-gradient(135deg,"+C.teal+","+C.tealD+")",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:C.bg,flexShrink:0}}>C</div>
+        {!col&&<div style={{flex:1,minWidth:0}}>
+          <p style={{fontSize:13,fontWeight:700,color:C.w,margin:0,letterSpacing:0.3}}>CLINIQ <span style={{color:C.teal}}>DIGITAL</span></p>
+          <p style={{fontSize:10,color:C.txD,margin:0}}>v2.0 · Plataforma IA</p>
+        </div>}
+        <button onClick={()=>setCol(!col)} style={{background:"none",border:"none",color:C.tx,cursor:"pointer",fontSize:14,padding:4}}>{col?"›":"‹"}</button>
       </div>
-      <nav style={{flex:1,padding:"4px 4px",display:"flex",flexDirection:"column",gap:0,overflowY:"auto"}}>
-        {MENU.map((m,i)=>{
-          if(m.g)return col?<div key={i} style={{height:1,background:C.bd,margin:"5px 3px",opacity:0.4}}/>:<div key={i} style={{fontSize:9,fontWeight:700,color:C.txD,letterSpacing:1.2,padding:"9px 8px 2px"}}>{m.g}</div>;
-          return <button key={m.id} onClick={()=>setAct(m.id)} title={m.lb} style={{display:"flex",alignItems:"center",gap:8,padding:col?"7px 0":"7px 8px",justifyContent:col?"center":"flex-start",background:act===m.id?(m.cl+"10"):"transparent",border:"none",borderRadius:6,cursor:"pointer",borderLeft:act===m.id?"2px solid "+m.cl:"2px solid transparent",width:"100%"}}>
-            <span style={{fontSize:12,color:act===m.id?m.cl:C.txD,flexShrink:0,width:16,textAlign:"center"}}>{m.ic}</span>
-            {!col&&<span style={{fontSize:12,fontWeight:act===m.id?600:400,color:act===m.id?C.w:C.tx,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.lb}</span>}
-          </button>;
-        })}
+
+      <nav style={{padding:"10px 6px"}}>
+        {MENU.map((m,i)=>m.g?
+          (!col&&<p key={"g-"+i} style={{fontSize:10,color:C.gold,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase",padding:"14px 10px 6px",margin:0}}>{m.g}</p>)
+          :<button key={m.id} onClick={()=>setAct(m.id)} style={{
+            display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 10px",margin:"2px 0",
+            background:act===m.id?bg8(m.cl):"transparent",
+            border:"none",borderRadius:7,color:act===m.id?m.cl:C.tx,
+            fontSize:12,fontFamily:font,cursor:"pointer",textAlign:"left",
+            fontWeight:act===m.id?600:500,transition:"all 0.15s"
+          }} title={col?m.lb:""}>
+            <span style={{fontSize:15,flexShrink:0,width:18,textAlign:"center"}}>{m.ic}</span>
+            {!col&&<span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.lb}</span>}
+          </button>
+        )}
       </nav>
-      <div style={{padding:"6px 4px",borderTop:"1px solid "+C.bd}}>
-        <button onClick={()=>setCol(!col)} style={{display:"flex",alignItems:"center",justifyContent:"center",width:"100%",padding:5,background:"none",border:"none",color:C.txD,fontSize:10,cursor:"pointer",borderRadius:5}}>{col?"→":"← Colapsar"}</button>
-      </div>
     </aside>
 
-    <main style={{flex:1,display:"flex",flexDirection:"column",minWidth:0}}>
-      <header style={{padding:"10px 20px",borderBottom:"1px solid "+C.bd,display:"flex",alignItems:"center",justifyContent:"space-between",background:C.sf,position:"sticky",top:0,zIndex:50}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <select value={act} onChange={e=>setAct(e.target.value)} className="mob-sel" style={{background:C.sf2,border:"1px solid "+C.bd,color:C.w,padding:"5px 8px",borderRadius:6,fontSize:11,display:"none"}}>
-            {ITEMS.map(t=><option key={t.id} value={t.id}>{t.lb}</option>)}
-          </select>
-          <style>{`@media(max-width:860px){.mob-sel{display:block!important}}`}</style>
-          <h1 style={{fontSize:14,fontWeight:700,color:C.w,margin:0}}>{curLabel}</h1>
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:10,color:C.txD,padding:"3px 8px",background:C.sf2,borderRadius:4}}>28 herramientas</span>
-          <div style={{width:26,height:26,borderRadius:6,background:bg8(C.teal),display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:C.teal}}>L</div>
-        </div>
-      </header>
-      <div style={{flex:1,padding:"18px 20px",overflowY:"auto"}}>{pages[act]||<Home go={setAct}/>}</div>
+    <main style={{flex:1,padding:"24px 30px",overflowX:"hidden",minWidth:0}}>
+      {tools[act]||<Home setAct={setAct}/>}
     </main>
   </div>;
 }
