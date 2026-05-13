@@ -150,6 +150,19 @@ export default function ProjectStudio({ setAct }){
   const [showHistory, setShowHistory] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [customPrompt, setCustomPrompt] = useState("");
+  const [provider, setProvider] = useState(() => localStorage.getItem("cliniq_provider") || "groq");
+
+  // Mapeo de proveedores -> modelo + label visible
+  const PROVIDERS = {
+    groq:      { lb:"Groq Llama 4",  ic:"🚀", model:"meta-llama/llama-4-maverick-17b-128e-instruct", desc:"Gratis, rapido", color:C.teal },
+    anthropic: { lb:"Claude Sonnet 4", ic:"💎", model:"claude-sonnet-4-20250514", desc:"Maxima calidad, requiere creditos", color:C.gold },
+    deepseek:  { lb:"DeepSeek Chat",   ic:"⚡", model:"deepseek-chat", desc:"Economico, calidad alta", color:C.purple }
+  };
+
+  const setProviderPersist = (p) => {
+    setProvider(p);
+    try{ localStorage.setItem("cliniq_provider", p); }catch{}
+  };
 
   useEffect(()=>{
     db.getClients().then(d=>setClients(d||[]));
@@ -297,21 +310,25 @@ export default function ProjectStudio({ setAct }){
 
     const system = buildSystem();
     const promptToUse = customPrompt && customPrompt.trim() ? customPrompt : buildPrompt();
-    const maxTokens = area === "metaads" ? 8192 :
-      (area === "segmentation" || area === "campaign" || area === "proposal" || area === "manual") ? 6144 : 4096;
+    // Limites segun proveedor (Groq y DeepSeek tienen tope distinto a Anthropic)
+    const maxTokens = provider === "anthropic"
+      ? (area === "metaads" ? 8192 : (area === "segmentation" || area === "campaign" || area === "proposal" || area === "manual") ? 6144 : 4096)
+      : (area === "metaads" ? 8000 : (area === "segmentation" || area === "campaign" || area === "proposal" || area === "manual") ? 6000 : 4000);
+
+    const P = PROVIDERS[provider];
 
     try{
       const r = await fetch("/api/generate", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          provider:"anthropic",
-          model:"claude-sonnet-4-20250514",
+          provider,
+          model: P.model,
           max_tokens: maxTokens,
           stream:true,
           system,
           messages:[{role:"user", content:promptToUse}],
-          hint: "Wizard " + AREAS[area].lb
+          hint: "Wizard " + AREAS[area].lb + " (" + P.lb + ")"
         })
       });
 
@@ -492,6 +509,26 @@ export default function ProjectStudio({ setAct }){
           </div>}
 
           {sel && <div style={{marginTop:28}}>
+            <label style={S.label} className="studio-mono">MOTOR DE IA</label>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:10}}>
+              {Object.entries(PROVIDERS).map(([key, P]) => {
+                const on = provider === key;
+                return <button key={key} onClick={()=>setProviderPersist(key)} style={{
+                  background: on ? P.color+"15" : C.bg,
+                  border: "1px solid " + (on ? P.color : C.bd),
+                  color: on ? P.color : C.w,
+                  padding:"12px 14px",borderRadius:10,cursor:"pointer",
+                  fontFamily:"inherit",textAlign:"left",transition:"all .2s"
+                }} className="s-chip">
+                  <div style={{fontSize:18,marginBottom:4}}>{P.ic}</div>
+                  <div style={{fontSize:13,fontWeight:600,marginBottom:2}}>{P.lb}</div>
+                  <div style={{fontSize:10,opacity:0.7}}>{P.desc}</div>
+                </button>;
+              })}
+            </div>
+          </div>}
+
+          {sel && <div style={{marginTop:28}}>
             <label style={S.label} className="studio-mono">AREA DE MARKETING A PRODUCIR</label>
             <div style={S.areasGrid}>
               {Object.entries(AREAS).map(([key, A]) => {
@@ -616,6 +653,10 @@ export default function ProjectStudio({ setAct }){
           <div style={S.summaryDivider}/>
 
           <div style={S.summaryTable}>
+            <div style={S.summaryRow}>
+              <div style={S.summaryKey}>Motor IA</div>
+              <div style={S.summaryVal}>{PROVIDERS[provider].ic} {PROVIDERS[provider].lb}</div>
+            </div>
             <div style={S.summaryRow}>
               <div style={S.summaryKey}>Cliente</div>
               <div style={S.summaryVal}>{sel.nombre}</div>
