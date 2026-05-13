@@ -91,6 +91,89 @@ export default function ProjectStudio({ setAct }){
 
   const selectedClient = clients.find(c=>String(c.id)===String(clientId));
 
+  // Parser JSON robusto con bracket matching y limpieza
+  const robustParse = (raw) => {
+    if(!raw) return null;
+    let t = String(raw);
+    // 1. Quitar fences markdown
+    t = t.replace(/```json/gi, "").replace(/```/g, "");
+    // 2. Smart quotes -> rectas
+    t = t.replace(/[\u201C\u201D\u201E\u201F]/g, '"').replace(/[\u2018\u2019\u201A\u201B]/g, "'");
+    // 3. Encontrar primer [
+    const start = t.indexOf("[");
+    if(start === -1) return null;
+    // 4. Bracket matching ignorando contenido dentro de strings
+    let depth = 0, end = -1, inString = false, escape = false;
+    for(let i = start; i < t.length; i++){
+      const ch = t[i];
+      if(escape){ escape = false; continue; }
+      if(ch === "\\"){ escape = true; continue; }
+      if(ch === '"'){ inString = !inString; continue; }
+      if(inString) continue;
+      if(ch === "[") depth++;
+      else if(ch === "]"){
+        depth--;
+        if(depth === 0){ end = i; break; }
+      }
+    }
+    let json;
+    if(end !== -1){
+      json = t.slice(start, end + 1);
+    } else {
+      // Truncado: intentar cerrar
+      let recovered = t.slice(start);
+      // Quitar coma final colgante si hay
+      recovered = recovered.replace(/,\s*$/, "");
+      // Si el ultimo objeto esta sin cerrar, cerrarlo
+      const openBraces = (recovered.match(/\{/g) || []).length;
+      const closeBraces = (recovered.match(/\}/g) || []).length;
+      recovered += "}".repeat(Math.max(0, openBraces - closeBraces));
+      recovered += "]".repeat(Math.max(1, depth));
+      json = recovered;
+    }
+    try{
+      return JSON.parse(json);
+    }catch(e){
+      // Ultimo intento: limpiar comas finales antes de } o ]
+      try{
+        return JSON.parse(json.replace(/,(\s*[\]\}])/g, "$1"));
+      }catch{
+        return null;
+      }
+    }
+  };
+
+  // Fallback heuristico: detectar entregables por palabras clave del brief
+  const heuristicFromBrief = (text) => {
+    const t = (text || "").toLowerCase();
+    const out = [];
+    const seen = new Set();
+    const add = (type, title, detail) => {
+      if(seen.has(type)) return;
+      seen.add(type);
+      out.push({type, title, detail});
+    };
+    if(/landing|p[aá]gina|web nueva|sitio/.test(t)) add("landing", "Landing page de captacion", "Hero con propuesta de valor, beneficios, prueba social, formulario y FAQ");
+    if(/whatsapp|wa\b|wsp/.test(t)) add("whatsapp", "Protocolo WhatsApp", "Saludo automatico, arbol de respuestas, secuencia de lead, follow-ups");
+    if(/(meta|facebook|instagram|fb|ig)\s*(ads|publicidad|campan|anuncios)|publicidad meta|campana meta|anuncios|ads/.test(t)) add("metaads", "Campana Meta Ads", "Objetivo, presupuesto, segmentacion completa, copys y creatividades");
+    if(/segmentaci[oó]n|audiencia|p[uú]blico objetivo|targeting/.test(t)) add("segmentation", "Segmentacion Meta", "Publico frio, retargeting, lookalikes y exclusiones");
+    if(/seo|art[ií]culo|blog|posicionamiento org[aá]nico/.test(t)) add("seo", "Articulo SEO", "Articulo optimizado de 1500 palabras con keyword research");
+    if(/redes sociales|posts?|publicaciones|contenido|instagram(?!\s*ads)/.test(t)) add("social", "Estrategia de redes", "Calendario, pilares de contenido y 10 ideas de post");
+    if(/video|reel|tiktok|shorts|guion/.test(t)) add("video", "Scripts video corto", "5 guiones para Reels/TikTok con hook y CTA");
+    if(/google business|gmb|gbp|ficha google|google my/.test(t)) add("gbp", "Google Business Profile", "Optimizacion ficha, publicaciones y plantillas resenas");
+    if(/email|secuencia|newsletter|mail|drip/.test(t)) add("followup", "Secuencia email", "7 emails de seguimiento desde lead hasta cierre");
+    if(/propuesta|presupuesto comercial|cotizaci[oó]n|oferta/.test(t)) add("proposal", "Propuesta comercial", "Documento con diagnostico, solucion, inversion y ROI");
+    if(/auditoria|diagn[oó]stico|an[aá]lisis web|revisi[oó]n/.test(t)) add("webstruct", "Arquitectura web", "Mapa de paginas, jerarquia y estructura de menu");
+    // Si no detecto nada, set por defecto sensato
+    if(out.length === 0){
+      add("landing", "Landing page principal", "Por definir segun brief");
+      add("social", "Estrategia de redes", "Por definir segun brief");
+      add("whatsapp", "Protocolo WhatsApp", "Por definir segun brief");
+      add("metaads", "Campana Meta Ads", "Por definir segun brief");
+    }
+    return out;
+  };
+
   // Llamar a la IA para que proponga entregables segun el brief
   const analyzeBrief = async () => {
     if(!brief.trim() || !selectedClient){
@@ -98,86 +181,116 @@ export default function ProjectStudio({ setAct }){
       return;
     }
     setStep("analyzing");
+
     const typesJSON = JSON.stringify(Object.keys(DELIVERABLE_TYPES));
     const system = `Eres director creativo senior de la agencia Conecta Nex. AÑO ACTUAL: 2026.
-Tu rol: leer un brief de proyecto y descomponerlo en entregables concretos.
-Devuelves SIEMPRE JSON valido (sin markdown, sin texto extra), array de entregables.
-Tipos validos: ${typesJSON}.
-Espanol de Espana, sin emojis, sin asteriscos.`;
+Tu unica tarea: leer un brief y devolver un array JSON de entregables.
+
+REGLAS DE FORMATO ABSOLUTAS:
+- Tu respuesta entera DEBE ser SOLO un array JSON valido.
+- Empieza tu respuesta directamente con [ y termina con ].
+- NO escribas ningun texto antes ni despues del array.
+- NO uses markdown, NO uses fences ` + "```" + `, NO expliques nada.
+- Usa comillas DOBLES rectas " no comillas tipograficas.
+- Strings sin saltos de linea internos.
+- Tipos validos exactamente: ${typesJSON}.
+
+ESTRUCTURA DE CADA ITEM:
+{"type":"...","title":"...","detail":"..."}
+- type: uno de los tipos validos
+- title: max 50 caracteres
+- detail: max 250 caracteres, una sola linea
+
+CONTENIDO:
+- Entre 3 y 8 entregables segun la complejidad del brief
+- Ordenados en orden logico de produccion
+- Si el brief menciona Meta Ads, prioriza incluir metaads y/o segmentation`;
 
     const userMsg = `CLIENTE: ${selectedClient.nombre}
-NICHO: ${selectedClient.nicho || "[completar]"}
-CIUDAD: ${selectedClient.ciudad_fiscal || selectedClient.ciudadFiscal || "[completar]"}
+NICHO: ${selectedClient.nicho || "no especificado"}
+CIUDAD: ${selectedClient.ciudad_fiscal || selectedClient.ciudadFiscal || "no especificada"}
 
 BRIEF DEL PROYECTO:
-"""
 ${brief}
-"""
 
-INSTRUCCIONES:
-1. Analiza el brief y propone entre 3 y 8 entregables concretos que la agencia debe producir.
-2. Cada entregable usa exactamente uno de los tipos validos.
-3. Para cada uno, da un titulo corto y descriptivo (max 50 caracteres) y un detalle de produccion (max 250 caracteres) que explique QUE debe contener y a QUE audiencia se dirige.
-4. Ordenalos en orden logico de produccion.
+EJEMPLO DE FORMATO VALIDO (no copies el contenido, solo el formato):
+[{"type":"landing","title":"Landing reformas cocina","detail":"Hero con propuesta, beneficios, formulario y FAQ"},{"type":"metaads","title":"Campana Meta captacion","detail":"600 EUR mes, leads form, segmentacion Alicante 35-60"}]
 
-Devuelve SOLO este JSON, sin texto antes ni despues:
-[
-  {"type":"landing","title":"...","detail":"..."},
-  {"type":"whatsapp","title":"...","detail":"..."}
-]`;
+Devuelve AHORA el array JSON con los entregables para este brief. SOLO el array, nada mas.`;
 
-    try{
+    const callIA = async () => {
       const r = await fetch("/api/generate", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           provider:"anthropic",
           model:"claude-sonnet-4-20250514",
-          max_tokens:2048,
-          stream:false,
+          max_tokens: 3072,
+          stream: false,
           system,
-          messages:[{role:"user", content:userMsg}],
+          // PREFILL: forzamos que la respuesta empiece con [
+          messages:[
+            {role:"user", content:userMsg},
+            {role:"assistant", content:"["}
+          ],
           hint:"Project Studio - Analisis"
         })
       });
       const data = await r.json();
-      let text = data.content?.[0]?.text || "";
-      // Limpiar posible markdown fence
-      text = text.replace(/```json|```/g, "").trim();
-      // Buscar el JSON dentro
-      const m = text.match(/\[[\s\S]*\]/);
-      const json = m ? m[0] : text;
-      let parsed;
+      const text = data.content?.[0]?.text || "";
+      // Reconstruir prefill
+      return text.trimStart().startsWith("[") ? text : ("[" + text);
+    };
+
+    let parsed = null;
+    let lastRaw = "";
+    for(let attempt = 1; attempt <= 3; attempt++){
       try{
-        parsed = JSON.parse(json);
+        const raw = await callIA();
+        lastRaw = raw;
+        parsed = robustParse(raw);
+        if(Array.isArray(parsed) && parsed.length > 0) break;
+        parsed = null;
       }catch(e){
-        alert("La IA devolvio una respuesta no valida. Intenta de nuevo.");
-        setStep("compose");
-        return;
+        console.warn("Project Studio analyze attempt", attempt, e);
       }
-      const items = parsed
+    }
+
+    let items = [];
+    let usedFallback = false;
+    if(Array.isArray(parsed)){
+      items = parsed
         .filter(it => it && DELIVERABLE_TYPES[it.type])
-        .map((it,i) => ({
-          id: Date.now()+i,
+        .map((it, i) => ({
+          id: Date.now() + i,
           type: it.type,
-          title: it.title || DELIVERABLE_TYPES[it.type].lb,
-          detail: it.detail || "",
-          status: "pending",   // pending | generating | done | error
-          content: "",
+          title: (it.title || DELIVERABLE_TYPES[it.type].lb).slice(0, 80),
+          detail: (it.detail || "").slice(0, 400),
+          status: "pending",
+          content: ""
         }));
-      if(items.length === 0){
-        alert("La IA no propuso entregables. Reformula el brief con mas detalle.");
-        setStep("compose");
-        return;
-      }
-      setDeliverables(items);
-      if(!projectName){
-        setProjectName(`Proyecto ${selectedClient.nombre.split(" ")[0]} - ${new Date().toLocaleDateString("es-ES",{day:"2-digit",month:"short"})}`);
-      }
-      setStep("board");
-    }catch(e){
-      alert("Error de conexion: " + e.message);
-      setStep("compose");
+    }
+    if(items.length === 0){
+      // Fallback heuristico para que NUNCA se quede el usuario sin propuesta
+      console.warn("Project Studio: IA fallo 3 veces. Aplicando fallback heuristico. Raw:", lastRaw);
+      items = heuristicFromBrief(brief).map((it, i) => ({
+        id: Date.now() + i,
+        type: it.type,
+        title: it.title,
+        detail: it.detail,
+        status: "pending",
+        content: ""
+      }));
+      usedFallback = true;
+    }
+
+    setDeliverables(items);
+    if(!projectName){
+      setProjectName(`Proyecto ${selectedClient.nombre.split(" ")[0]} - ${new Date().toLocaleDateString("es-ES",{day:"2-digit",month:"short"})}`);
+    }
+    setStep("board");
+    if(usedFallback){
+      setTimeout(() => alert("La IA tuvo problemas con el formato. Te he montado una propuesta base segun palabras clave del brief. Puedes editar cada tarjeta, borrar las que no quieras o anadir mas, y luego pulsar Generar."), 300);
     }
   };
 
