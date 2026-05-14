@@ -154,7 +154,7 @@ export default function ProjectStudio({ setAct }){
 
   // Mapeo de proveedores -> modelo + label visible
   const PROVIDERS = {
-    groq:      { lb:"Groq Llama 4",  ic:"🚀", model:"meta-llama/llama-4-maverick-17b-128e-instruct", desc:"Gratis, rapido", color:C.teal },
+    groq:      { lb:"Groq Llama 3.3 70B",  ic:"🚀", model:"llama-3.3-70b-versatile", desc:"Gratis, rapido, 128K context", color:C.teal },
     anthropic: { lb:"Claude Sonnet 4", ic:"💎", model:"claude-sonnet-4-20250514", desc:"Maxima calidad, requiere creditos", color:C.gold },
     deepseek:  { lb:"DeepSeek Chat",   ic:"⚡", model:"deepseek-chat", desc:"Economico, calidad alta", color:C.purple }
   };
