@@ -180,10 +180,13 @@ export default async function handler(req, res) {
 
 async function handleOpenAICompatible({ res, body, useStream, cacheable, cacheKey, hint, apiUrl, apiKey, defaultModel, providerName, providerSlug }) {
   const modelUsed = body.model || defaultModel;
+  // IMPORTANTE: hacemos siempre la peticion a Groq/DeepSeek SIN stream.
+  // El streaming SSE pasando por Vercel serverless puede quedar bufferizado
+  // dando aspecto de "no genera nada". Hacemos no-stream y simulamos SSE al cliente.
   const reqBody = {
     model: modelUsed,
     max_tokens: body.max_tokens || 4096,
-    stream: useStream,
+    stream: false,
     messages: [],
   };
   if (body.system) reqBody.messages.push({ role: 'system', content: body.system });
@@ -191,102 +194,100 @@ async function handleOpenAICompatible({ res, body, useStream, cacheable, cacheKe
   if (body.temperature !== undefined) reqBody.temperature = body.temperature;
 
   try {
+    console.log(`[${providerName}] Request -> model=${modelUsed} system_len=${(body.system||'').length} max_tokens=${reqBody.max_tokens}`);
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
       body: JSON.stringify(reqBody),
     });
 
-    if (useStream) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); } catch (e) {
+      console.error(`[${providerName}] Respuesta no JSON:`, text.slice(0, 300));
+      if (useStream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.write(`data: ${JSON.stringify({ type: 'error', error: { message: `${providerName}: respuesta no valida del servidor` } })}\n\n`);
+        res.end();
+        return;
+      }
+      return res.status(502).json({ error: `Respuesta no valida de ${providerName}: ` + text.slice(0, 200) });
+    }
 
-      if (!response.ok) {
-        const errText = await response.text();
-        let errMsg;
-        try { errMsg = JSON.parse(errText).error?.message || errText.slice(0, 300); } catch(e) { errMsg = errText.slice(0, 300); }
+    if (!response.ok || data.error) {
+      const errMsg = data.error?.message || data.error || `HTTP ${response.status}`;
+      console.error(`[${providerName}] Error API:`, errMsg);
+      if (useStream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
         res.write(`data: ${JSON.stringify({ type: 'error', error: { message: `${providerName}: ${errMsg}` } })}\n\n`);
         res.end();
         return;
       }
+      return res.status(response.status).json({ error: `${providerName}: ${errMsg}` });
+    }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let blockStarted = false;
-      let fullText = '';
-      let tokensIn = 0;
-      let tokensOut = 0;
+    const content = data.choices?.[0]?.message?.content || '';
+    const tokensIn = data.usage?.prompt_tokens || 0;
+    const tokensOut = data.usage?.completion_tokens || 0;
 
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+    console.log(`[${providerName}] OK -> content_len=${content.length} tokens_in=${tokensIn} tokens_out=${tokensOut}`);
 
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const raw = line.slice(6).trim();
-            if (raw === '[DONE]') {
-              res.write(`data: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
-              continue;
-            }
-            try {
-              const chunk = JSON.parse(raw);
-              const delta = chunk.choices?.[0]?.delta;
-              if (delta?.content) {
-                if (!blockStarted) {
-                  res.write(`data: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
-                  blockStarted = true;
-                }
-                res.write(`data: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: delta.content } })}\n\n`);
-                fullText += delta.content;
-              }
-              if (chunk.usage) {
-                tokensIn = chunk.usage.prompt_tokens || tokensIn;
-                tokensOut = chunk.usage.completion_tokens || tokensOut;
-              }
-            } catch (pe) {}
-          }
-        }
-      } catch (streamErr) {
-        console.error(`${providerName} stream error:`, streamErr);
+    if (!content) {
+      const errMsg = `${providerName} devolvio contenido vacio (revisa el system prompt o el modelo ${modelUsed})`;
+      console.error(`[${providerName}] Contenido vacio. usage:`, data.usage);
+      if (useStream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.write(`data: ${JSON.stringify({ type: 'error', error: { message: errMsg } })}\n\n`);
+        res.end();
+        return;
       }
+      return res.status(502).json({ error: errMsg });
+    }
+
+    // Cachear si procede
+    if (cacheable && content.length > 100) {
+      saveToCache({
+        key: cacheKey, provider: providerSlug, model: modelUsed,
+        system: body.system, resultado: content, hint,
+        tokensIn, tokensOut,
+      });
+    }
+
+    if (useStream) {
+      // Simulamos SSE: envio en bloques de ~80 caracteres para que el frontend
+      // vea texto cayendo (no instantaneo) sin depender del streaming real.
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+
+      res.write(`data: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
+
+      const CHUNK = 80;
+      for (let i = 0; i < content.length; i += CHUNK) {
+        const piece = content.slice(i, i + CHUNK);
+        res.write(`data: ${JSON.stringify({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: piece } })}\n\n`);
+      }
+      res.write(`data: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
       res.end();
-
-      if (cacheable && fullText && fullText.length > 100) {
-        saveToCache({
-          key: cacheKey, provider: providerSlug, model: modelUsed,
-          system: body.system, resultado: fullText, hint,
-          tokensIn, tokensOut,
-        });
-      }
     } else {
-      const text = await response.text();
-      let data;
-      try { data = JSON.parse(text); } catch (e) {
-        return res.status(502).json({ error: `Respuesta no valida de ${providerName}: ` + text.slice(0, 200) });
-      }
-      const content = data.choices?.[0]?.message?.content || '';
-      if (cacheable && response.ok && content.length > 100) {
-        saveToCache({
-          key: cacheKey, provider: providerSlug, model: modelUsed,
-          system: body.system, resultado: content, hint,
-          tokensIn: data.usage?.prompt_tokens, tokensOut: data.usage?.completion_tokens,
-        });
-      }
-      return res.status(response.status).json({ content: [{ type: 'text', text: content }] });
+      return res.status(200).json({ content: [{ type: 'text', text: content }] });
     }
   } catch (error) {
-    console.error(`${providerName} proxy error:`, error);
+    console.error(`[${providerName}] proxy exception:`, error.message || error);
     if (useStream) {
       try {
-        res.write(`data: ${JSON.stringify({ type: 'error', error: { message: error.message } })}\n\n`);
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.write(`data: ${JSON.stringify({ type: 'error', error: { message: `${providerName}: ${error.message || 'Error de conexion'}` } })}\n\n`);
         res.end();
-      } catch(e) { res.end(); }
+      } catch(e) { try{res.end();}catch{} }
     } else {
       return res.status(500).json({ error: error.message || 'Internal server error' });
     }
