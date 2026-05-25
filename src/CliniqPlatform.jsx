@@ -553,6 +553,9 @@ const MODELS={
   fast:"claude-haiku-4-5-20251001",
   mid:"claude-sonnet-4-5-20250929",
   full:"claude-sonnet-4-20250514",
+  gemini:"gemini-2.5-flash",
+  geminiLite:"gemini-2.5-flash-lite",
+  cerebras:"llama-3.3-70b",
   ds:"deepseek-chat",
   dsr:"deepseek-reasoner",
   groqFast:"llama-3.1-8b-instant",
@@ -564,8 +567,8 @@ function pickModel(toolHint){
   const groqTier=["Respuesta Reseñas","Google Business","WhatsApp","Scripts Vídeo","Prompts Imagen IA","Multiplicador Contenido","Manual Comunicación","Secuencias Seguimiento","Expansión Plataformas","Auditoría NAP","SEO Voz","Monitor de Marca"];
   const midTier=["Landing Pages","Contenido SEO","Estrategia Redes","Arquitectura Web","Verificador Normativo","Reporting Mensual"];
   if(groqTier.some(t=>toolHint?.includes(t))) return {model:MODELS.groqMid,provider:"groq"};
-  if(midTier.some(t=>toolHint?.includes(t))) return {model:MODELS.mid,provider:"anthropic"};
-  return {model:MODELS.full,provider:"anthropic"};
+  if(midTier.some(t=>toolHint?.includes(t))) return {model:MODELS.gemini,provider:"gemini"};
+  return {model:MODELS.gemini,provider:"gemini"};
 }
 
 async function ai(sysExtra,prompt,setO,setL,niche,geo,logInfo){
