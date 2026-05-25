@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     system: body.system || '',
     messages: body.messages || [],
   });
-  const cacheable = shouldCache({ tools: body.tools, hint, system: body.system });
+  const cacheable = !body.web_search && shouldCache({ tools: body.tools, hint, system: body.system });
 
   if (cacheable) {
     const cached = await getFromCache(cacheKey);
@@ -41,6 +41,18 @@ export default async function handler(req, res) {
   }
 
   res.setHeader('X-Cliniq-Cache', 'MISS');
+
+  // Busqueda web GRATIS con Gemini + Google Search grounding.
+  // Traduce la respuesta de Gemini al formato SSE estilo Anthropic que ya entiende el front.
+  if (body.web_search === true) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.write(`data: ${JSON.stringify({ type: 'error', error: { message: 'GEMINI_API_KEY not configured.' } })}\n\n`);
+      return res.end();
+    }
+    return handleGeminiGrounded({ res, body, apiKey: geminiKey, model: body.model || 'gemini-2.5-flash' });
+  }
 
   if (provider === 'groq') {
     const groqKey = process.env.GROQ_API_KEY;
@@ -317,5 +329,84 @@ async function handleOpenAICompatible({ res, body, useStream, cacheable, cacheKe
     } else {
       return res.status(500).json({ error: error.message || 'Internal server error' });
     }
+  }
+}
+
+// Busqueda web con Gemini 2.5 + Google Search grounding (GRATIS).
+// Hace la peticion nativa a Gemini (no-stream) y emite SSE estilo Anthropic
+// para que el parser de aiSearch del front funcione sin cambios:
+//  - content_block_start con web_search_tool_result -> fuentes
+//  - content_block_delta text_delta -> texto en bloques
+//  - message_stop
+async function handleGeminiGrounded({ res, body, apiKey, model }) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+
+  const sendError = (message) => {
+    res.write(`data: ${JSON.stringify({ type: 'error', error: { message } })}\n\n`);
+    res.end();
+  };
+
+  try {
+    const contents = (body.messages || []).map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
+    }));
+
+    const reqBody = {
+      contents,
+      tools: [{ google_search: {} }],
+      generationConfig: { maxOutputTokens: body.max_tokens || 4096 },
+    };
+    if (body.system) reqBody.systemInstruction = { parts: [{ text: body.system }] };
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reqBody),
+    });
+
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); } catch (e) {
+      return sendError(`Gemini: respuesta no valida (${text.slice(0, 200)})`);
+    }
+    if (!response.ok || data.error) {
+      return sendError(`Gemini: ${data.error?.message || `HTTP ${response.status}`}`);
+    }
+
+    const cand = data.candidates?.[0];
+    const parts = cand?.content?.parts || [];
+    const fullText = parts.filter((p) => p.text).map((p) => p.text).join('');
+
+    // Fuentes desde groundingMetadata
+    const chunks = cand?.groundingMetadata?.groundingChunks || [];
+    const sources = chunks
+      .map((c) => c.web)
+      .filter((w) => w && w.uri)
+      .map((w) => ({ type: 'web_search_result', url: w.uri, title: w.title || w.uri }));
+
+    if (sources.length > 0) {
+      res.write(`data: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'web_search_tool_result', content: sources } })}\n\n`);
+    }
+
+    if (!fullText) {
+      return sendError('Gemini devolvio contenido vacio en la busqueda web.');
+    }
+
+    res.write(`data: ${JSON.stringify({ type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } })}\n\n`);
+    const CHUNK = 80;
+    for (let i = 0; i < fullText.length; i += CHUNK) {
+      const piece = fullText.slice(i, i + CHUNK);
+      res.write(`data: ${JSON.stringify({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: piece } })}\n\n`);
+    }
+    res.write(`data: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
+    res.end();
+  } catch (error) {
+    console.error('Gemini grounded error:', error.message || error);
+    try { sendError(`Gemini: ${error.message || 'Error de conexion'}`); } catch (e) { try { res.end(); } catch (e2) {} }
   }
 }
