@@ -566,7 +566,7 @@ const MODELS={
 function pickModel(toolHint){
   const groqTier=["Respuesta Reseñas","Google Business","WhatsApp","Scripts Vídeo","Prompts Imagen IA","Multiplicador Contenido","Manual Comunicación","Secuencias Seguimiento","Expansión Plataformas","Auditoría NAP","SEO Voz","Monitor de Marca"];
   const midTier=["Landing Pages","Contenido SEO","Estrategia Redes","Arquitectura Web","Verificador Normativo","Reporting Mensual"];
-  if(groqTier.some(t=>toolHint?.includes(t))) return {model:MODELS.groqMid,provider:"groq"};
+  if(groqTier.some(t=>toolHint?.includes(t))) return {model:MODELS.groqPro,provider:"groq"};
   if(midTier.some(t=>toolHint?.includes(t))) return {model:MODELS.gemini,provider:"gemini"};
   return {model:MODELS.gemini,provider:"gemini"};
 }
@@ -1677,8 +1677,10 @@ function Clients(){
       });
       if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||"Error generando enlace");}
       const data=await r.json();
-      setShareLink(data.url);
-      navigator.clipboard.writeText(data.url).catch(()=>{});
+      const url=data.url||(data.token?`https://clientes.conectanex.com/api/client-view?token=${data.token}`:"");
+      if(!url) throw new Error("No se recibio el enlace");
+      setShareLink(url);
+      navigator.clipboard.writeText(url).catch(()=>{});
     }catch(e){alert("Error: "+e.message);}
   };
 

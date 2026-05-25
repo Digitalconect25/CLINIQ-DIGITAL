@@ -32,16 +32,21 @@ export default async function handler(req, res) {
       const { clientId } = req.body;
       if (!clientId) return res.status(400).json({ error: 'clientId required' });
 
+      // Base del enlace publico de la ficha de cliente (dominio propio).
+      const base = process.env.CLIENT_VIEW_BASE_URL || 'https://clientes.conectanex.com';
+      const buildUrl = (t) => `${base}/api/client-view?token=${t}`;
+
       // Check if token exists
       const existing = await sql`SELECT share_token FROM clients WHERE id = ${clientId}`;
       if (existing[0]?.share_token) {
-        return res.status(200).json({ token: existing[0].share_token });
+        const token = existing[0].share_token;
+        return res.status(200).json({ token, url: buildUrl(token) });
       }
 
       // Generate new token
       const token = genToken();
       await sql`UPDATE clients SET share_token = ${token} WHERE id = ${clientId}`;
-      return res.status(200).json({ token });
+      return res.status(200).json({ token, url: buildUrl(token) });
     }
 
     // GET - Render public view
