@@ -32,8 +32,8 @@ export default async function handler(req, res) {
       const { clientId } = req.body;
       if (!clientId) return res.status(400).json({ error: 'clientId required' });
 
-      // Base del enlace publico de la ficha de cliente (dominio propio).
-      const base = process.env.CLIENT_VIEW_BASE_URL || 'https://clientes.conectanex.com';
+      // Base del enlace publico de la ficha de cliente (dominio de la propia app Cliniq).
+      const base = process.env.CLIENT_VIEW_BASE_URL || `https://${req.headers.host}`;
       const buildUrl = (t) => `${base}/api/client-view?token=${t}`;
 
       // Check if token exists
