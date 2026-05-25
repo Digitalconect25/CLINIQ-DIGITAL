@@ -68,6 +68,32 @@ export default async function handler(req, res) {
     });
   }
 
+  if (provider === 'gemini') {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) return res.status(500).json({ error: 'GEMINI_API_KEY not configured.' });
+    return handleOpenAICompatible({
+      res, body, useStream, cacheable, cacheKey, hint,
+      apiUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+      apiKey: geminiKey,
+      defaultModel: 'gemini-2.5-flash',
+      providerName: 'Gemini',
+      providerSlug: 'gemini',
+    });
+  }
+
+  if (provider === 'cerebras') {
+    const cbKey = process.env.CEREBRAS_API_KEY;
+    if (!cbKey) return res.status(500).json({ error: 'CEREBRAS_API_KEY not configured.' });
+    return handleOpenAICompatible({
+      res, body, useStream, cacheable, cacheKey, hint,
+      apiUrl: 'https://api.cerebras.ai/v1/chat/completions',
+      apiKey: cbKey,
+      defaultModel: 'llama-3.3-70b',
+      providerName: 'Cerebras',
+      providerSlug: 'cerebras',
+    });
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured on server' });
 
