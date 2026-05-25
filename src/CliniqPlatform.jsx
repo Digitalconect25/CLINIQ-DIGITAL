@@ -633,9 +633,8 @@ async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
     const r=await fetch("/api/generate",{
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
-        model:"claude-sonnet-4-20250514",max_tokens:4096,stream:true,system:sys,
+        provider:"gemini",model:MODELS.gemini,web_search:true,max_tokens:4096,stream:true,system:sys,
         messages:[{role:"user",content:prompt}],
-        tools:[{type:"web_search_20250305",name:"web_search"}],
         hint:logInfo?.tool||""
       })
     });
@@ -688,7 +687,7 @@ async function aiSearch(sysExtra,prompt,setO,setL,niche,geo,setPhase,logInfo){
     if(retryNeeded) continue;
     if(sources.length>0){full+="\n\n---\nFUENTES CONSULTADAS:\n";sources.forEach(s=>{full+=`- ${s.title}: ${s.url}\n`;});setO(full);}
     if(!full) setO("Sin resultados. Verifica los datos e intenta de nuevo.");
-    if(full){const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);logActivity(toolName+" (Web)",logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full,{provider:"anthropic",model:"claude-sonnet-4-20250514",inputText:prompt});}
+    if(full){const toolName=logInfo?.tool||inferToolName(sysExtra,prompt);logActivity(toolName+" (Web)",logInfo?.client||"Sin asignar",logInfo?.inputs||extractInputs(prompt),full,{provider:"gemini",model:MODELS.gemini,inputText:prompt});}
     if(setPhase) setPhase("done");setL(false);return;
   }catch(e){
     if(attempt<maxRetries-1){setO("Error de conexion, reintentando en 5s...");await new Promise(ok=>setTimeout(ok,5000));continue;}
