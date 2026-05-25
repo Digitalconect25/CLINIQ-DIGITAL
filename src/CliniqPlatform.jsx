@@ -217,6 +217,7 @@ const MENU = [
   {g:"GESTIÓN"},
   {id:"clients",ic:"◈",lb:"Clientes / Facturación",cl:C.teal},
   {id:"tasks",ic:"☑",lb:"Tareas / Pendientes",cl:C.orange},
+  {id:"perfiles-ext",ic:"↗",lb:"Perfiles Clientes",cl:C.cyan,href:"https://clientes.conectanex.com/"},
 ];
 const ITEMS=MENU.filter(m=>m.id);
 
@@ -566,7 +567,7 @@ const MODELS={
 function pickModel(toolHint){
   const groqTier=["Respuesta Reseñas","Google Business","WhatsApp","Scripts Vídeo","Prompts Imagen IA","Multiplicador Contenido","Manual Comunicación","Secuencias Seguimiento","Expansión Plataformas","Auditoría NAP","SEO Voz","Monitor de Marca"];
   const midTier=["Landing Pages","Contenido SEO","Estrategia Redes","Arquitectura Web","Verificador Normativo","Reporting Mensual"];
-  if(groqTier.some(t=>toolHint?.includes(t))) return {model:MODELS.groqMid,provider:"groq"};
+  if(groqTier.some(t=>toolHint?.includes(t))) return {model:MODELS.groqPro,provider:"groq"};
   if(midTier.some(t=>toolHint?.includes(t))) return {model:MODELS.gemini,provider:"gemini"};
   return {model:MODELS.gemini,provider:"gemini"};
 }
@@ -1676,8 +1677,10 @@ function Clients(){
       });
       if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.error||"Error generando enlace");}
       const data=await r.json();
-      setShareLink(data.url);
-      navigator.clipboard.writeText(data.url).catch(()=>{});
+      const url=data.url||(data.token?`${window.location.origin}/api/client-view?token=${data.token}`:"");
+      if(!url) throw new Error("No se recibio el enlace");
+      setShareLink(url);
+      navigator.clipboard.writeText(url).catch(()=>{});
     }catch(e){alert("Error: "+e.message);}
   };
 
@@ -2252,7 +2255,7 @@ export default function App(){
       <nav style={{padding:"10px 6px"}}>
         {MENU.map((m,i)=>m.g?
           (!col&&<p key={"g-"+i} style={{fontSize:10,color:C.gold,fontWeight:600,letterSpacing:0.5,textTransform:"uppercase",padding:"14px 10px 6px",margin:0}}>{m.g}</p>)
-          :<button key={m.id} onClick={()=>setAct(m.id)} style={{
+          :<button key={m.id} onClick={()=>m.href?window.open(m.href,"_blank","noopener,noreferrer"):setAct(m.id)} style={{
             display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 10px",margin:"2px 0",
             background:act===m.id?bg8(m.cl):"transparent",
             border:"none",borderRadius:7,color:act===m.id?m.cl:C.tx,

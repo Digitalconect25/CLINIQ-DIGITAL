@@ -61,7 +61,7 @@ export default async function handler(req, res) {
       res, body, useStream, cacheable, cacheKey, hint,
       apiUrl: 'https://api.groq.com/openai/v1/chat/completions',
       apiKey: groqKey,
-      defaultModel: 'meta-llama/llama-4-maverick-17b-128e-instruct',
+      defaultModel: 'llama-3.3-70b-versatile',
       providerName: 'Groq',
       providerSlug: 'groq',
     });
