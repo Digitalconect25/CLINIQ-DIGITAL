@@ -181,6 +181,8 @@ function isHealthLabel(lb){
 
 const MENU = [
   {g:"PANEL"},{id:"home",ic:"◫",lb:"Panel de Control",cl:C.teal},
+  {g:"HUBS"},
+  {id:"diag360",ic:"⊙",lb:"Diagnóstico 360",cl:C.cyan},
   {g:"PRODUCCIÓN"},
   {id:"landing",ic:"◧",lb:"Landing Pages",cl:C.blue},
   {id:"whatsapp",ic:"◩",lb:"Protocolos WhatsApp",cl:C.green},
@@ -220,6 +222,39 @@ const MENU = [
   {id:"perfiles-ext",ic:"↗",lb:"Perfiles Clientes",cl:C.cyan,href:"https://clientes.conectanex.com/"},
 ];
 const ITEMS=MENU.filter(m=>m.id);
+
+/* ══════ HUB DIAGNÓSTICO 360 — config ══════ */
+const DIAGNOSTICO_SECTIONS = [
+  { key:"scan360", label:"Scan Presencia 360", web:true, essential:true,
+    system:"Investigador de presencia digital en 2026.",
+    buildPrompt:(i)=>`SCAN 360 para: "${i.cliente}" en ${i.geo}. Sector: ${i.nicho}. Web: ${i.web||"No proporcionada"}.
+Busca: 1) "${i.cliente}" en Google 2) "${i.cliente} resenas" 3) "${i.nicho} en ${i.geo}" 4) Presencia en Google Maps, Facebook, Instagram, Doctoralia.
+Genera: ESTADO POR PLATAFORMA, RESENAS, COMPETENCIA, GAPS, PLAN DE ACCION.` },
+  { key:"deepweb", label:"Análisis Profundo Web", web:true, essential:false,
+    system:"Investigador digital profesional en 2026.",
+    buildPrompt:(i)=>`ANALISIS PROFUNDO para: "${i.cliente}" en ${i.geo}. Sector: ${i.nicho}. Web: ${i.web||"No proporcionada"}. Competidor: ${i.competidores||"Buscar"}.
+Busca: presencia Google, resenas, redes, competencia, SEO. Genera informe con FUENTES REALES.` },
+  { key:"auditoria", label:"Auditoría Digital", web:false, essential:true,
+    system:"Auditor experto en experiencia digital para negocios locales.",
+    buildPrompt:(i)=>`Auditoria digital de: ${i.web||i.cliente}. Geo: ${i.geo}. Sector: ${i.nicho}. Notas: Ninguna
+Genera: RESUMEN EJECUTIVO, WEB (/100), SEO LOCAL (/100), GBP (/100), EXPERIENCIA DIGITAL (/100), REDES (/100), PLAN PRIORIZADO, PROYECCION.` },
+  { key:"competencia", label:"Competencia Local", web:false, essential:true,
+    system:"Analista de competencia digital en 2026.",
+    buildPrompt:(i)=>`Analisis competencia para: ${i.cliente} en ${i.geo}. Competidores: ${i.competidores||"Buscar principales"}. Sector: ${i.nicho}.
+Genera: MAPA COMPETITIVO, WEB COMPARATIVO, SEO LOCAL, GOOGLE MAPS, REDES, PRECIOS, OPORTUNIDADES GEO-LOCALES, PLAN.` },
+  { key:"nap", label:"Auditoría NAP/Citations", web:false, essential:false,
+    system:"Experto en SEO local y consistencia NAP para negocios en Espana.",
+    buildPrompt:(i)=>`AUDITORIA NAP para: "${i.cliente}". Dir: "[COMPLETAR]". Ciudad: ${i.geo}. Tel: "[COMPLETAR]". Web: "${i.web||"[COMPLETAR]"}". Sector: ${i.nicho}.
+Genera: ANALISIS NOMBRE, DIRECCION, TELEFONO, WEB, IMPACTO SEO, CHECKLIST CORRECCION, HERRAMIENTAS, MANTENIMIENTO.` },
+  { key:"reputacion", label:"Reputación y Reseñas", web:true, essential:true,
+    system:"Investigador de reputacion online en 2026.",
+    buildPrompt:(i)=>`DIAGNOSTICO REPUTACION para: "${i.cliente}" en ${i.geo}. Sector: ${i.nicho}.
+Busca resenas reales, compara con competencia, analiza sentimiento. Plan de solicitud y protocolo respuesta.` },
+  { key:"marca", label:"Monitor de Marca", web:false, essential:false,
+    system:"Consultor de brand monitoring y online reputation management.",
+    buildPrompt:(i)=>`PLAN MONITORIZACION para: ${i.cliente} en ${i.geo}. Sector: ${i.nicho}.
+Genera: ALERTAS GOOGLE, ALERTAS GBP, ALERTAS REDES, RESENAS, COMPETENCIA, NEGATIVO, HERRAMIENTAS, PROTOCOLO RESPUESTA, INFORME MENSUAL, CALENDARIO.` },
+];
 
 const PLANS = [
   {id:"esencial",lb:"Esencial",price:"297",desc:"Presencia básica + SEO local"},
@@ -1289,6 +1324,68 @@ Busca el negocio, detecta estado real, genera: DIAGNOSTICO EXPRESS, FASE 1 URGEN
   </div>;
 }
 
+/* ══════ HUB GENÉRICO + DIAGNÓSTICO 360 ══════ */
+function Hub({ title, subtitle, sections, accent }){
+  const [ni,sNi]=useState("");const [cni,sCni]=useState("");
+  const [nm,sNm]=useState("");const [ci,sCi]=useState("");
+  const [pv,sPv]=useState("");const [web,sWeb]=useState("");
+  const [comp,sComp]=useState("");
+  const [sel,sSel]=useState(()=>new Set(sections.filter(s=>s.essential).map(s=>s.key)));
+  const [outs,sOuts]=useState({});
+  const [running,sRunning]=useState(false);
+  const nR=resolveNiche(ni,cni); const geo=geoStr(ci,pv,"");
+  const toggle=(k)=>{const n=new Set(sel);n.has(k)?n.delete(k):n.add(k);sSel(n);};
+  const setOut=(k,patch)=>sOuts(o=>({...o,[k]:{...(o[k]||{}),...patch}}));
+  async function runKeys(keys){
+    if(running) return; sRunning(true);
+    const inputs={cliente:nm||"[Cliente]",nicho:nR,geo,web,competidores:comp};
+    for(const k of keys){
+      const sec=sections.find(s=>s.key===k); if(!sec) continue;
+      const prompt=sec.buildPrompt(inputs);
+      const log={tool:sec.label,client:nm||"Sin asignar"};
+      const setO=(v)=>setOut(k,{text:typeof v==="function"?v(outs[k]?.text||""):v});
+      const setL=(b)=>setOut(k,{loading:b});
+      const setPhase=(p)=>setOut(k,{phase:p});
+      if(sec.web) await aiSearch(sec.system,prompt,setO,setL,nR,geo,setPhase,log);
+      else await ai(sec.system,prompt,setO,setL,nR,geo,log);
+    }
+    sRunning(false);
+  }
+  const runSelected=()=>runKeys([...sel]);
+  const runEssential=()=>{const ek=sections.filter(s=>s.essential).map(s=>s.key);sSel(new Set(ek));runKeys(ek);};
+  return <div>
+    <h3 style={{fontSize:18,fontWeight:700,color:C.w,margin:"0 0 4px"}}>{title}</h3>
+    <p style={{fontSize:12,color:C.txD,margin:"0 0 14px"}}>{subtitle}</p>
+    <Crd sx={{marginBottom:14}}>
+      <NicheSelector niche={ni} setNiche={sNi} customNiche={cni} setCustomNiche={sCni}
+        onClientSelect={({nombre,ciudad,provincia})=>{sNm(nombre||"");sCi(ciudad||"");sPv(provincia||"");}}/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginTop:10}}>
+        <Fld label="Centro *"><Inp value={nm} onChange={sNm} ph="Nombre"/></Fld>
+        <Fld label="Ciudad *"><Inp value={ci} onChange={sCi} ph="Ciudad"/></Fld>
+        <Fld label="Provincia"><Inp value={pv} onChange={sPv} ph="Provincia"/></Fld>
+        <Fld label="Web"><Inp value={web} onChange={sWeb} ph="https://"/></Fld>
+        <Fld label="Competidores (opcional)"><Inp value={comp} onChange={sComp} ph="Nombres o vacío"/></Fld>
+      </div>
+      <div style={{marginTop:12,display:"flex",flexWrap:"wrap",gap:8}}>
+        {sections.map(s=><label key={s.key} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:C.tx,cursor:"pointer",padding:"4px 8px",background:sel.has(s.key)?bg8(accent||C.teal):C.sf2,borderRadius:6}}>
+          <input type="checkbox" checked={sel.has(s.key)} onChange={()=>toggle(s.key)}/>{s.label}
+        </label>)}
+      </div>
+      <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
+        <Btn primary color={accent||C.teal} onClick={runSelected} disabled={running||!nm||!ci||sel.size===0}>Generar seleccionadas ({sel.size})</Btn>
+        <Btn color={C.gold} onClick={runEssential} disabled={running||!nm||!ci}>Generar lo esencial</Btn>
+      </div>
+    </Crd>
+    {sections.filter(s=>outs[s.key]).map(s=><div key={s.key} style={{marginBottom:14}}>
+      <OutSearch content={outs[s.key]?.text||""} loading={outs[s.key]?.loading} label={s.label} phase={outs[s.key]?.phase}/>
+    </div>)}
+  </div>;
+}
+
+function DiagnosticoHub(){
+  return <Hub title="Diagnóstico 360" subtitle="Auditoría completa de presencia digital en una sola pasada" sections={DIAGNOSTICO_SECTIONS} accent={C.cyan}/>;
+}
+
 /* ══════ IMAGE PROMPT + FLUX ══════ */
 function ImagePrompt(){
   const[ni,sNi]=useState("");const[cni,sCni]=useState("");
@@ -2205,6 +2302,7 @@ export default function App(){
 
   const tools={
     home:<ProjectStudio setAct={setAct}/>,
+    diag360:<DiagnosticoHub/>,
     landing:<Landing/>,
     whatsapp:<WhatsApp/>,
     seo:<Seo/>,
