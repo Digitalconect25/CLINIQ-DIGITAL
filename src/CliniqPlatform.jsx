@@ -1343,7 +1343,7 @@ function Hub({ title, subtitle, sections, accent }){
       const sec=sections.find(s=>s.key===k); if(!sec) continue;
       const prompt=sec.buildPrompt(inputs);
       const log={tool:sec.label,client:nm||"Sin asignar"};
-      const setO=(v)=>setOut(k,{text:typeof v==="function"?v(outs[k]?.text||""):v});
+      const setO=(v)=>sOuts(o=>({...o,[k]:{...(o[k]||{}),text:typeof v==="function"?v(o[k]?.text||""):v}}));
       const setL=(b)=>setOut(k,{loading:b});
       const setPhase=(p)=>setOut(k,{phase:p});
       if(sec.web) await aiSearch(sec.system,prompt,setO,setL,nR,geo,setPhase,log);
